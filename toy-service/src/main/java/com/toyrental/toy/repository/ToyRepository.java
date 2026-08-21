@@ -32,6 +32,8 @@ public interface ToyRepository extends JpaRepository<Toy, String> {
 
     Page<Toy> findByActiveTrueAndStatusNot(ToyStatus status, Pageable pageable);
 
+    Page<Toy> findByActiveTrueAndStatus(ToyStatus status, Pageable pageable);
+
     Page<Toy> findByActiveTrue(Pageable pageable);
 
 }

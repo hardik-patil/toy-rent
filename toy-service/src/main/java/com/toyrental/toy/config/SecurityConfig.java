@@ -2,6 +2,7 @@ package com.toyrental.toy.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -30,7 +31,20 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/prometheus").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/internal/v1/toys/**").permitAll()
-                        .requestMatchers("GET", "/api/v1/toys/**").permitAll()
+                        // Bug caught by live testing: requestMatchers(String, String...) has no overload
+                        // that takes an HTTP method as a String — "GET" was being matched as a second URL
+                        // pattern (which never matches any real path), so this rule permitAll()'d every
+                        // method on /api/v1/toys/**, including POST/PUT/DELETE, regardless of the ADMIN
+                        // rules below. Must use the HttpMethod overload to actually restrict by verb.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/toys/**").permitAll()
+                        // Writes on the /api/v1/toys/** resource (create/update/delete/image-upload) are
+                        // admin-only per CLAUDE.md's endpoint reference, even though they don't live under
+                        // /api/v1/admin/**. Must be matched before the GET permitAll rule above would not
+                        // catch these (different HTTP methods) and before the generic authenticated() below
+                        // would under-restrict them to "any logged-in user".
+                        .requestMatchers(HttpMethod.POST, "/api/v1/toys", "/api/v1/toys/*/images").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/toys/*").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/toys/*").hasRole("ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
@@ -49,7 +63,6 @@ public class SecurityConfig {
         return converter;
     }
 
-    @SuppressWarnings("unchecked")
     private Collection<GrantedAuthority> extractAuthorities(Jwt jwt) {
         JwtGrantedAuthoritiesConverter scopeConverter = new JwtGrantedAuthoritiesConverter();
         Collection<GrantedAuthority> scopeAuthorities = scopeConverter.convert(jwt);

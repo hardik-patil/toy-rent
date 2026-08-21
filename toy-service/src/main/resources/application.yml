@@ -29,6 +29,11 @@ spring:
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
         spring.json.trusted.packages: "com.toyrental.*"
+        # Producers (booking-service) publish plain JSON with no __TypeId__ header — that header
+        # would encode the producer's own class name (com.toyrental.booking.kafka.*) anyway, which
+        # doesn't exist on this service's classpath. Deserialize by the envelope shape instead.
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: com.toyrental.toy.kafka.BookingEventEnvelope
     producer:
       # used only to publish to *.DLT topics when a listener exhausts its retries
       key-serializer: org.apache.kafka.common.serialization.StringSerializer

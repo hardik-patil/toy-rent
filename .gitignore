@@ -47,3 +47,6 @@ dist/
 *.key
 application-local.yml
 application-secrets.yml
+
+### Local Docker Compose port overrides ###
+docker-compose.override.yml

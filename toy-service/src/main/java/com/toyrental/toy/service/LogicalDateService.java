@@ -39,15 +39,15 @@ public class LogicalDateService {
     }
 
     public LocalDate getCurrentDate() {
-        return resolve().currentDate;
+        return resolve().getCurrentDate();
     }
 
     public boolean isMonthEnd() {
-        return resolve().isMonthEnd;
+        return resolve().isMonthEnd();
     }
 
     public boolean isOverdueCheckDay() {
-        return resolve().isOverdueCheckDay;
+        return resolve().isOverdueCheckDay();
     }
 
     private synchronized LogicalDateDocument resolve() {

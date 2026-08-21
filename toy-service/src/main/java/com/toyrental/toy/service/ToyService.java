@@ -145,14 +145,24 @@ public class ToyService {
         return ToyResponse.ToyImageResponse.from(saved);
     }
 
+    @Transactional(readOnly = true)
+    public List<ToyResponse> toResponses(List<Toy> toys) {
+        Map<String, List<ToyResponse.ToyImageResponse>> imagesByToyId = imagesByToyId(toys);
+        return toys.stream()
+                .map(toy -> ToyResponse.from(toy, imagesByToyId.getOrDefault(toy.getId(), List.of())))
+                .toList();
+    }
+
     private Page<ToyResponse> toEnrichedPage(Page<Toy> page) {
-        List<String> toyIds = page.getContent().stream().map(Toy::getId).toList();
-        Map<String, List<ToyResponse.ToyImageResponse>> imagesByToyId = toyImageRepository
-                .findByToyIdInOrderBySortOrderAsc(toyIds).stream()
+        Map<String, List<ToyResponse.ToyImageResponse>> imagesByToyId = imagesByToyId(page.getContent());
+        return page.map(toy -> ToyResponse.from(toy, imagesByToyId.getOrDefault(toy.getId(), List.of())));
+    }
+
+    private Map<String, List<ToyResponse.ToyImageResponse>> imagesByToyId(List<Toy> toys) {
+        List<String> toyIds = toys.stream().map(Toy::getId).toList();
+        return toyImageRepository.findByToyIdInOrderBySortOrderAsc(toyIds).stream()
                 .collect(Collectors.groupingBy(ToyImage::getToyId,
                         Collectors.mapping(ToyResponse.ToyImageResponse::from, Collectors.toList())));
-
-        return page.map(toy -> ToyResponse.from(toy, imagesByToyId.getOrDefault(toy.getId(), List.of())));
     }
 
     private ToyResponse toResponse(Toy toy) {

@@ -2,6 +2,12 @@ package com.toyrental.toy.config;
 
 import com.couchbase.client.java.Bucket;
 import com.couchbase.client.java.Cluster;
+import com.couchbase.client.java.ClusterOptions;
+import com.couchbase.client.java.codec.JacksonJsonSerializer;
+import com.couchbase.client.java.env.ClusterEnvironment;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -15,9 +21,31 @@ import java.time.Duration;
 @Configuration
 public class CouchbaseConfig {
 
-    @Bean
-    public Cluster couchbaseCluster(CouchbaseProperties props) {
-        return Cluster.connect(props.getConnectionString(), props.getUsername(), props.getPassword());
+    /**
+     * The Couchbase SDK's default JSON (de)serializer is backed by its own isolated Jackson
+     * ObjectMapper — separate from Spring's, and without java.time support. Every document here
+     * has LocalDate/Instant fields (blockedDates, nextAvailable, currentDate, lastUpdated, ...),
+     * so without this, writes throw EncodingFailureException and reads throw
+     * DecodingFailureException, both wrapping Jackson's "Java 8 date/time type ... not supported
+     * by default". Caught earlier only because LogicalDateService's read path swallows the
+     * failure and falls back to LocalDate.now() — silently defeating the "never call
+     * LocalDate.now() directly" rule this service otherwise follows.
+     */
+    @Bean(destroyMethod = "shutdown")
+    public ClusterEnvironment couchbaseClusterEnvironment() {
+        ObjectMapper couchbaseObjectMapper = new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+        return ClusterEnvironment.builder()
+                .jsonSerializer(JacksonJsonSerializer.create(couchbaseObjectMapper))
+                .build();
+    }
+
+    @Bean(destroyMethod = "disconnect")
+    public Cluster couchbaseCluster(CouchbaseProperties props, ClusterEnvironment environment) {
+        return Cluster.connect(props.getConnectionString(),
+                ClusterOptions.clusterOptions(props.getUsername(), props.getPassword()).environment(environment));
     }
 
     @Bean(name = "availabilityBucket")
