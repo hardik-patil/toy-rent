@@ -20,7 +20,7 @@ For the detailed step-by-step build record behind the checked items, see
 | Sprint | Status | Stories |
 |---|---|---|
 | S1 — Infrastructure | ✅ Complete | 6/6 |
-| S2 — Toy Service | ⬜ Not started | 0/9 |
+| S2 — Toy Service | ✅ Complete | 9/9 |
 | S3 — Booking Service | ⬜ Not started | 0/10 |
 | S4 — Kafka Pipeline | ⬜ Not started | 0/10 |
 | S5 — Month-End Report | ⬜ Not started | 0/8 |
@@ -53,22 +53,45 @@ can run end-to-end):**
 
 ---
 
-## S2 — Toy Service — 0/9
+## S2 — Toy Service ✅ 9/9 (2026-08-21)
 
-- [ ] `Toy` entity + `ToyRepository` + request/response DTOs
-- [ ] `ToyController` (catalogue, detail, search, categories, browse-available)
-- [ ] `AvailabilityController` + `AvailabilityService` (Couchbase-backed)
-- [ ] `AdminToyController` (add/update/soft-delete, inventory, low-stock,
+- [x] `Toy` entity + `ToyRepository` + request/response DTOs
+- [x] `ToyController` (catalogue, detail, search, categories) — browse-available
+      lives on `AvailabilityController` instead (`GET /api/v1/toys/available`)
+- [x] `AvailabilityController` + `AvailabilityService` (Couchbase-backed)
+- [x] `AdminToyController` (add/update/soft-delete, inventory, low-stock,
       condition update, image upload)
-- [ ] `LogicalDateService` (Couchbase `logical-date::current`, Redis-cached,
-      falls back to `LocalDate.now()`)
-- [ ] `BookingEventConsumer` (Kafka: `booking.confirmed`/`booking.cancelled` →
-      update Couchbase availability + `toy_availability_log`)
-- [ ] Couchbase config + `ToyAvailabilityDocument` / `LogicalDateDocument`
-- [ ] `GlobalExceptionHandler` + `ToyNotFoundException` /
+- [x] `LogicalDateService` (Couchbase `logical-date::current`) — **deviation**:
+      in-process 60s TTL cache instead of Redis, since toy-service declares no
+      Redis dependency in the approved stack (only api-gateway does); falls
+      back to `LocalDate.now()` if Couchbase is unreachable
+- [x] `BookingEventConsumer` (Kafka: `booking.confirmed`/`booking.cancelled` →
+      update Couchbase availability + `toy_availability_log`), plus
+      `InternalToyController` for booking-service's pre-booking toy lookup and
+      a manual availability-override endpoint
+- [x] Couchbase config + `ToyAvailabilityDocument` / `LogicalDateDocument`
+- [x] `GlobalExceptionHandler` + `ToyNotFoundException` /
       `ToyNotAvailableException`
-- [ ] Unit tests (`ToyControllerTest`, `AvailabilityServiceTest`,
-      `BookingEventConsumerTest`)
+- [x] Unit tests (`ToyControllerTest`, `AvailabilityServiceTest`,
+      `BookingEventConsumerTest`) — 15 tests, all passing
+
+**Bugs found and fixed while completing/validating this sprint** (see
+`PROGRESS.md` Session 2 for full detail): `LogicalDateService` compile error
+(direct field access instead of Lombok getters — service never compiled
+before this), `AvailabilityService` used `LocalDate.now()` directly, a
+`SecurityConfig` matcher bug that silently `permitAll()`'d every HTTP verb on
+`/api/v1/toys/**` instead of just GET (bypassing admin protection), Couchbase's
+default JSON serializer lacking `JavaTimeModule` (broke every document
+read/write with `LocalDate`/`Instant` fields), a missing Kafka JSON default-type
+mapping, a non-executable `docker/postgres-init/init-databases.sh` (so
+`toydb`/`bookingdb` were never created), and `bitnami/kafka:3.7` having been
+pulled from Docker Hub (swapped for `apache/kafka:3.7.2`).
+
+Validated end-to-end against live Postgres/Couchbase/Kafka: catalogue browse,
+availability checks, admin auth enforcement (401 without JWT), a real
+`booking.confirmed` event blocking a toy's dates, idempotent replay (no
+duplicate rows), `booking.cancelled` releasing the block, and
+browse-available correctly excluding a booked toy.
 
 ## S3 — Booking Service — 0/10
 

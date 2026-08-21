@@ -1209,7 +1209,7 @@ Claude Code must NOT pre-fix these. They are found via JMeter tests.
 | Sprint | Status | Completed Stories |
 |---|---|---|
 | S1 — Infrastructure | ✅ Complete | 6/6 |
-| S2 — Toy Service | ⬜ Not started | 0/9 |
+| S2 — Toy Service | ✅ Complete | 9/9 |
 | S3 — Booking Service | ⬜ Not started | 0/10 |
 | S4 — Kafka Pipeline | ⬜ Not started | 0/10 |
 | S5 — Month-End Report | ⬜ Not started | 0/8 |
@@ -1229,7 +1229,13 @@ Format: date, service, description, root cause, fix applied.
 
 | Date | Service | Bug | Root Cause | Fix |
 |---|---|---|---|---|
-| — | — | None yet | — | — |
+| 2026-08-21 | toy-service | `LogicalDateService` failed to compile | `getCurrentDate()`/`isMonthEnd()`/`isOverdueCheckDay()` accessed `LogicalDateDocument`'s private fields directly instead of via its Lombok getters | Call the getters |
+| 2026-08-21 | toy-service | `AvailabilityService` violated the "never call `LocalDate.now()` directly" rule | Fallback path in `loadOrDefault()` called `LocalDate.now()` instead of `LogicalDateService.getCurrentDate()` | Route through `LogicalDateService` |
+| 2026-08-21 | toy-service | Admin-only toy writes (POST/PUT/DELETE `/api/v1/toys/**`) were reachable without a JWT | `SecurityConfig` used `.requestMatchers("GET", "/api/v1/toys/**")` — no such `(String, String)` overload exists, so `"GET"` was matched as a second URL *pattern*, making the rule `permitAll()` every HTTP verb on that path | Use the `HttpMethod.GET` overload explicitly |
+| 2026-08-21 | toy-service | Couchbase writes/reads of any document with `LocalDate`/`Instant` fields threw `EncodingFailureException`/`DecodingFailureException`; `LogicalDateService` silently fell back to the wall clock every time | Couchbase SDK's default Jackson `JsonSerializer` has no `JavaTimeModule` registered | Build a custom `ClusterEnvironment` with a `JacksonJsonSerializer` backed by an `ObjectMapper` that registers `JavaTimeModule` |
+| 2026-08-21 | toy-service | Kafka consumers couldn't deserialize events from another service | No `spring.json.value.default.type` set, so `JsonDeserializer` needed a `__TypeId__` header matching a class on this service's own classpath | Set `spring.json.use.type.headers: false` + `spring.json.value.default.type` to the envelope class |
+| 2026-08-21 | infra | `toydb`/`bookingdb` and their users were never created on a fresh Postgres container | `docker/postgres-init/init-databases.sh` was committed without the executable bit, so `docker-entrypoint-initdb.d` skipped it with "bad interpreter: Permission denied" | `chmod +x` the script |
+| 2026-08-21 | infra | `docker compose up kafka` failed to pull the image | `bitnami/kafka:3.7` (and the entire `bitnami/kafka` repo) was removed from Docker Hub in Bitnami's 2025 catalog restructuring | Switched to the official `apache/kafka:3.7.2` image at the same pinned version line |
 
 ---
 

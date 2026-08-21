@@ -172,3 +172,231 @@ and the three service skeletons (api-gateway, toy-service, booking-service).
   `admin/admin` but no `toyrental` realm configured.
 - No application code beyond scaffolding — no controllers, services,
   entities, DTOs, Kafka producers/consumers (Sprint 2/3 scope).
+
+---
+
+## Session 2 — 2026-08-21 — Sprint 2: Toy Service (completion, bugfixes, live validation)
+
+**Goal:** Finish the toy-service surface left over from the prior session's
+partial Sprint 2 work (entities/repositories/DTOs/`ToyService`/
+`AvailabilityService`/`LogicalDateService`/Couchbase config already existed;
+`ToyController` only covered the public browse/detail/search/categories
+routes), fix any bugs found along the way, and prove the result actually
+works end-to-end against live infra rather than just compiling.
+
+### Steps
+
+1. Read the existing toy-service code in full to establish what Sprint 1's
+   session had actually built vs. what SPRINTS.md's S2 checklist still listed
+   as outstanding: `AvailabilityController`, `AdminToyController`, a Kafka
+   `BookingEventConsumer`, and all three unit test files were missing.
+
+2. Added `ToyRepository.findByActiveTrueAndStatus(...)` (needed for the
+   browse-available filter; the existing `findByActiveTrueAndStatusNot` only
+   covered the inverse low-stock case).
+
+3. **Bug found by inspection:** `SecurityConfig` permitted `GET` on
+   `/api/v1/toys/**` but let every other verb (including the admin-only
+   POST/PUT/DELETE CLAUDE.md documents for that same path) fall through to
+   plain `authenticated()` — any logged-in customer, not just admins, could
+   create/update/delete toys. Added explicit `HttpMethod.POST/PUT/DELETE`
+   rules scoped to `hasRole("ADMIN")`, ordered before the generic
+   `/api/v1/admin/**` rule.
+
+4. Added the Kafka event contract toy-service and (eventually) booking-service
+   will share: `BookingEventEnvelope` (CLAUDE.md's standard envelope shape)
+   and `BookingEventPayload` (bookingId/toyId/customerId/startDate/endDate),
+   under a new `kafka` package.
+
+5. **Bug found by inspection:** Couchbase consumers deserialize with
+   `spring.json.trusted.packages` set but no default-type mapping — a
+   producer from a different service package (booking-service, not yet
+   built) would never carry a matching `__TypeId__` header. Added
+   `spring.json.use.type.headers: false` +
+   `spring.json.value.default.type: com.toyrental.toy.kafka.BookingEventEnvelope`
+   to `application.yml`.
+
+6. Extended `AvailabilityService` with `blockDates`/`releaseDates` (idempotent
+   per bookingId — replaces any prior range for the same booking rather than
+   duplicating), a `computeNextAvailable` scan, and `browseAvailable` (used by
+   the new `GET /api/v1/toys/available` endpoint). Added `ToyService.toResponses(List<Toy>)`,
+   refactoring the existing per-page image-lookup into a shared helper.
+
+7. **Bug found by inspection:** `AvailabilityService.loadOrDefault()` called
+   `LocalDate.now()` directly for the no-Couchbase-doc default, violating
+   CLAUDE.md's explicit "never use `LocalDate.now()` in business logic" rule.
+   Fixed to go through the now-injected `LogicalDateService`.
+
+8. Wrote `AvailabilityController` (check/calendar/browse-available),
+   `AdminToyController` (create/update/soft-delete/image-upload/inventory/
+   low-stock/condition), and `InternalToyController` (the
+   `/internal/v1/toys/**` routes CLAUDE.md documents for booking-service's
+   Feign client, plus a manual block/release override endpoint reusing the
+   same `AvailabilityService` methods the Kafka consumer uses).
+
+9. Wrote `BookingEventConsumer`: `@KafkaListener`s for `booking.confirmed`/
+   `booking.cancelled`, eventId idempotency via the existing
+   `ProcessedEventRepository`, correlationId propagated into MDC for the
+   duration of each event so the log pattern picks it up automatically.
+   Deliberately did **not** mark the shared `process()` helper
+   `@Transactional` — it's invoked as `this.process(...)` from the
+   `@KafkaListener` methods (Spring AOP self-invocation), so the annotation
+   would silently be a no-op; documented why in a comment instead of leaving
+   a misleading annotation.
+
+10. Wrote 15 unit tests: `ToyControllerTest` (`@WebMvcTest`, security filters
+    disabled since the routes under test are all `permitAll`),
+    `AvailabilityServiceTest` (Mockito, covers check/block/release/replace-
+    on-same-bookingId), `BookingEventConsumerTest` (Mockito, covers both
+    topics' happy path and the idempotent-skip path).
+
+11. Compiled with JDK 17 (Temurin already present at
+    `/Library/Java/JavaVirtualMachines/jdk-17.0.4.1.jdk` on this machine —
+    no install needed this time, unlike Session 1's Windows environment).
+    First compile attempt failed:
+
+    **Bug found by compiling** (pre-existing, not introduced this session):
+    `LogicalDateService.getCurrentDate()`/`isMonthEnd()`/`isOverdueCheckDay()`
+    accessed `LogicalDateDocument.currentDate`/`.isMonthEnd`/
+    `.isOverdueCheckDay` as bare field access across classes instead of via
+    the Lombok-generated getters — the fields are `private`, so this never
+    compiled. `LogicalDateService` had apparently never actually been built
+    before this session. Fixed to call the getters.
+
+12. Ran the new tests: 14/15 passed on the first run; the 15th
+    (`blockDatesReplacesAnyExistingRangeForTheSameBooking`) NPE'd because the
+    test itself forgot to stub `logicalDateService.getCurrentDate()` — a test
+    bug, not a service bug. Fixed the test; all 15 passed after.
+
+### Live validation against real infra
+
+13. Brought up `docker compose up -d postgres couchbase kafka`.
+
+    **Bug found:** `bitnami/kafka:3.7` — the entire `bitnami/kafka` repository
+    — no longer exists on Docker Hub (Bitnami pulled free tags in an August
+    2025 catalog restructuring; confirmed via the Docker Hub API returning
+    zero tags). Swapped to `apache/kafka:3.7.2`, the official image at the
+    same pinned 3.7.x line, translating Bitnami's `KAFKA_CFG_*` env vars to
+    the official image's plain `KAFKA_*` names.
+
+14. Postgres wouldn't bind port 5432 — a native PostgreSQL 15 install already
+    running on this Mac (unrelated to this project) held the port. Rather
+    than touch that install or the committed `docker-compose.yml` (which is
+    correct for other environments), added a gitignored
+    `docker-compose.override.yml` remapping the container to host port 5433
+    (`ports: !override` — Compose's list-merge is append-by-default, so the
+    plain form would have tried to bind *both* 5432 and 5433).
+
+15. Docker itself got wedged recreating the postgres container — `docker
+    start`/`inspect`/`rm` all hung indefinitely on that one container while
+    `docker ps`/`docker system df` kept working, meaning it wasn't a daemon-
+    wide hang. Asked the user before taking any disruptive action; they
+    picked "restart Docker Desktop for me," but before doing that, a plain
+    `docker rm -f` (already backgrounded from the wedge) finished on its own,
+    letting `docker compose up -d postgres` recreate it cleanly without
+    actually needing the restart.
+
+16. **Bug found:** the freshly-created Postgres container logged
+    `/docker-entrypoint-initdb.d/init-databases.sh: /bin/bash: bad
+    interpreter: Permission denied` and skipped it — `toydb`/`bookingdb` and
+    their users were never created. Root cause: the script was committed
+    without the executable bit (`-rw-r--r--`). Fixed with `chmod +x`, then
+    recreated the Postgres volume so the init script would actually run
+    against an empty data directory (Postgres only runs
+    `docker-entrypoint-initdb.d` scripts once, on first init).
+
+17. Initialized the Couchbase cluster via its REST API (memory quota,
+    services, `Administrator`/`password` credentials matching CLAUDE.md's dev
+    defaults), created the `toy-availability` and `logical-date` buckets, and
+    seeded `logical-date::current` via the N1QL query service.
+
+18. Ran `toy-service` with `mvnw spring-boot:run`, overriding
+    `SPRING_DATASOURCE_URL` to point at the host-mapped port 5433 (the
+    checked-in `application.yml` hardcodes port 5432, which is correct for
+    every environment except this one machine's port conflict — overridden
+    via env var for this run rather than editing the file). App started
+    clean in ~5s: Postgres, Couchbase, and both Kafka consumer groups all
+    connected.
+
+19. Exercised `GET /api/v1/toys` (seeded catalogue loads) and
+    `GET /api/v1/toys/{id}/availability` (cache miss, available=true) —
+    both worked.
+
+20. Tested the SecurityConfig admin-gating fix from step 3 with a real
+    unauthenticated `POST /api/v1/toys`. Got **400** (validation error, not
+    401) — meaning the request reached the controller unauthenticated.
+
+    **Bug found:** `.requestMatchers("GET", "/api/v1/toys/**").permitAll()`
+    — `requestMatchers` has no `(String method, String pattern)` overload,
+    so `"GET"` was being matched as a second URL *pattern* (which never
+    matches any real path), and `/api/v1/toys/**` matched *regardless of HTTP
+    method*. This made the whole rule `permitAll()` every verb on that path,
+    silently overriding the ADMIN rules added in step 3 further down the
+    chain — they were never wrong, they just never got evaluated. Fixed to
+    `.requestMatchers(HttpMethod.GET, "/api/v1/toys/**")`. Re-verified:
+    unauthenticated POST/DELETE now both return 401; GET still works.
+
+21. Published a `booking.confirmed` event to the real Kafka topic via
+    `kafka-console-producer.sh` inside the container. The consumer picked it
+    up but threw on every retry:
+
+    **Bug found:** `com.couchbase.client.core.error.EncodingFailureException`
+    → `InvalidDefinitionException: Java 8 date/time type LocalDate not
+    supported by default: add Module jackson-datatype-jsr310`. Couchbase's
+    SDK uses its own internal Jackson `ObjectMapper`, entirely separate from
+    Spring's autoconfigured one, and it has no `JavaTimeModule` registered by
+    default. Every document in this service (`ToyAvailabilityDocument`,
+    `LogicalDateDocument`) has `LocalDate`/`Instant` fields, so **every**
+    Couchbase read and write was affected. Cross-checking the earlier "cache
+    miss, available=true" result from step 19 against the log confirmed
+    `LogicalDateService` had *also* been silently hitting this on every read
+    and falling back to `LocalDate.now()` the whole time — a second symptom
+    of the exact same root cause, masked because the read path catches and
+    logs a WARN instead of propagating.
+
+    Fixed `CouchbaseConfig` to build a custom `ClusterEnvironment` with a
+    `JacksonJsonSerializer` backed by an `ObjectMapper` that registers
+    `JavaTimeModule` (`jackson-datatype-jsr310` was already transitively on
+    the classpath via `spring-boot-starter-web`, just never wired into
+    Couchbase's own mapper instance).
+
+22. Restarted and re-ran the full flow end-to-end, clean this time:
+    - Availability check before booking: `available=true`, and the log now
+      shows *zero* "Failed to read logical-date::current" fallback warnings.
+    - Published `booking.confirmed` → log shows "Blocked availability" and
+      "Processed eventId=..."; availability check flips to `available=false`
+      with the correct blocked-date range.
+    - Replayed the identical event (same eventId) → log shows "Skipping
+      already-processed"; `toy_availability_log` and `processed_events` each
+      have exactly one row (verified via `psql`, not just log-reading).
+    - `GET /api/v1/toys/available` for the same date range correctly
+      excludes the now-booked toy.
+    - Published `booking.cancelled` for the same booking → log shows
+      "Released availability"; availability check flips back to
+      `available=true`, `blockedDates` empty; both the `BLOCKED` and
+      `RELEASED` rows present in `toy_availability_log`.
+
+23. Ran the full `mvn test` suite: all 15 new tests pass.
+    `ToyServiceApplicationTests.contextLoads` still fails — it uses the
+    committed `application.yml`'s hardcoded port 5432, which conflicts with
+    this machine's native Postgres. Not a code bug (the full context
+    demonstrably boots clean under `spring-boot:run` with the port
+    overridden); left as the same known, already-tracked limitation as
+    Session 1 rather than hacking the committed config around one machine's
+    local port conflict.
+
+24. Committed as `50c0544` (23 files: the new controllers/kafka
+    package/DTOs/tests, plus the bugfixes above). Left
+    `toyrental-postgres`/`kafka`/`couchbase` and `toy-service` running for
+    continued use; `docker-compose.override.yml` (gitignored) holds the
+    5433 port remap for this machine.
+
+**Not done in this session:**
+- Keycloak realm still not imported — the admin-auth fix was validated via
+  401-without-JWT, not a full authenticated ROLE_ADMIN request.
+- `POST /api/v1/toys/{toyId}/images` (image upload) accepts a pre-hosted URL
+  only, not raw file bytes — consistent with toy-service having no MinIO
+  dependency in the approved stack (booking-service owns that).
+- Sprint 3 (booking-service) not started — `InternalToyController` and the
+  `BookingEventEnvelope`/`BookingEventPayload` shape are ready for it to
+  build against.
