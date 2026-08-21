@@ -1,0 +1,7 @@
+package com.toyrental.booking.entity;
+
+public enum NotificationType {
+    BOOKING_CONFIRMED, BOOKING_CANCELLED, PAYMENT_SUCCESS,
+    PAYMENT_FAILED, OVERDUE_REMINDER, DEPOSIT_REFUNDED,
+    REPORT_GENERATED
+}

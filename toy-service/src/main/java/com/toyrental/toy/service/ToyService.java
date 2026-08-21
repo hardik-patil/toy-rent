@@ -20,6 +20,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static com.toyrental.toy.util.IdGenerator.shortId;
+
 @Slf4j
 @Service
 public class ToyService {
@@ -67,7 +69,7 @@ public class ToyService {
     @Transactional
     public ToyResponse create(ToyRequest request) {
         Toy toy = Toy.builder()
-                .id("toy-" + UUID.randomUUID())
+                .id(shortId("toy"))
                 .name(request.name())
                 .description(request.description())
                 .brand(request.brand())
@@ -81,7 +83,11 @@ public class ToyService {
                 .depositAmount(request.depositAmount())
                 .active(true)
                 .build();
-        Toy saved = toyRepository.save(toy);
+        // saveAndFlush, not save: createdAt/updatedAt are populated by Hibernate's
+        // @CreationTimestamp/@UpdateTimestamp generators only when the INSERT is actually flushed
+        // to the DB, which a plain save() inside @Transactional defers until commit — reading them
+        // back immediately afterward (toResponse below) would otherwise see null.
+        Toy saved = toyRepository.saveAndFlush(toy);
         log.info("Created toy id={}", saved.getId());
         return toResponse(saved);
     }
@@ -105,7 +111,7 @@ public class ToyService {
         toy.setMonthlyPrice(request.monthlyPrice());
         toy.setDepositAmount(request.depositAmount());
 
-        Toy saved = toyRepository.save(toy);
+        Toy saved = toyRepository.saveAndFlush(toy);
         log.info("Updated toy id={}", saved.getId());
         return toResponse(saved);
     }
@@ -124,7 +130,7 @@ public class ToyService {
         Toy toy = toyRepository.findByIdAndActiveTrue(toyId)
                 .orElseThrow(() -> new ToyNotFoundException(toyId));
         toy.setCondition(condition);
-        Toy saved = toyRepository.save(toy);
+        Toy saved = toyRepository.saveAndFlush(toy);
         log.info("Updated condition for toy id={} condition={}", toyId, condition);
         return toResponse(saved);
     }

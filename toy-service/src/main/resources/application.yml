@@ -26,8 +26,17 @@ spring:
       group-id: toy-service-cg
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # Wraps JsonDeserializer so a malformed/unparseable record becomes a catchable
+      # DeserializationException that DefaultErrorHandler can route through the normal
+      # retry-then-DLT path, instead of a raw SerializationException thrown at Kafka's poll()
+      # level — which DefaultErrorHandler explicitly cannot handle, and which bypasses retry
+      # backoff entirely, causing the consumer to re-fetch and re-fail the same poison-pill
+      # record as fast as the CPU allows (found live: a leftover headerless test message from
+      # manual kafka-console-producer testing spun a consumer to 2.5M+ log lines in ~10s before
+      # this fix).
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: "com.toyrental.*"
         # Producers (booking-service) publish plain JSON with no __TypeId__ header — that header
         # would encode the producer's own class name (com.toyrental.booking.kafka.*) anyway, which

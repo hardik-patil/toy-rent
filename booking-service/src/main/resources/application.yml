@@ -28,8 +28,18 @@ spring:
     consumer:
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # Wraps JsonDeserializer so a malformed/unparseable record becomes a catchable
+      # DeserializationException that DefaultErrorHandler can route through the normal
+      # retry-then-DLT path, instead of a raw SerializationException thrown at Kafka's poll()
+      # level — which bypasses retry backoff entirely and can spin a consumer thread at CPU
+      # speed on a single poison-pill record. Found live: this service's first-ever
+      # notification-cg consumer, starting at auto-offset-reset=earliest, hit a leftover
+      # headerless test message on booking.confirmed (from Sprint 2's manual
+      # kafka-console-producer testing) and spun to 2.5M+ log lines / a 19GB log file in under
+      # 10 seconds before this fix.
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: "com.toyrental.*"
   security:
     oauth2:
@@ -56,6 +66,10 @@ wiremock:
 feign:
   toy-service:
     url: ${TOY_SERVICE_URL:http://localhost:8081}
+
+overdue-check:
+  initial-delay-ms: ${OVERDUE_CHECK_INITIAL_DELAY_MS:30000}
+  interval-ms: ${OVERDUE_CHECK_INTERVAL_MS:21600000}
 
 resilience4j:
   circuitbreaker:
