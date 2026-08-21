@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/orders"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "order_mock123",
+      "status": "created",
+      "amount": 199900,
+      "currency": "INR",
+      "receipt": "bkg-00291"
+    }
+  }
+}

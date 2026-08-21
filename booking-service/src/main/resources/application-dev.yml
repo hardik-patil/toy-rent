@@ -1,0 +1,10 @@
+spring:
+  jpa:
+    show-sql: true
+
+logging:
+  level:
+    com.toyrental: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.springframework.kafka: DEBUG
+    org.springframework.cloud.openfeign: DEBUG

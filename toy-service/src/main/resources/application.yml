@@ -1,0 +1,70 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: toy-service
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:5432/toydb
+    username: ${POSTGRES_USER:toyuser}
+    password: ${POSTGRES_PASSWORD:toypass}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: toy-service-cg
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.toyrental.*"
+    producer:
+      # used only to publish to *.DLT topics when a listener exhausts its retries
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/toyrental}
+
+couchbase:
+  connection-string: ${COUCHBASE_CONNECTION_STRING:couchbase://localhost}
+  username: ${COUCHBASE_USERNAME:Administrator}
+  password: ${COUCHBASE_PASSWORD:password}
+  bucket:
+    availability: toy-availability
+    logical-date: logical-date
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} correlationId=%X{correlationId} - %msg%n"
+  level:
+    com.toyrental: DEBUG
+    org.springframework.kafka: INFO

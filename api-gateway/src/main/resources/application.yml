@@ -1,0 +1,82 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  cloud:
+    gateway:
+      routes:
+        - id: toy-service
+          uri: ${TOY_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/v1/toys/**,/internal/v1/toys/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: toyService
+                fallbackUri: forward:/fallback/toy-service
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                redis-rate-limiter.requestedTokens: 1
+        - id: booking-service
+          uri: ${BOOKING_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/v1/customers/**,/api/v1/bookings/**,/api/v1/payments/**,/api/v1/admin/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: bookingService
+                fallbackUri: forward:/fallback/booking-service
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                redis-rate-limiter.requestedTokens: 1
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/toyrental}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      toyService:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+      bookingService:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} correlationId=%X{correlationId} - %msg%n"
+  level:
+    com.toyrental: DEBUG
+    org.springframework.cloud.gateway: INFO

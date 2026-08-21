@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/payments/verify"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "razorpay_payment_id": "pay_mock456",
+      "razorpay_order_id": "order_mock123",
+      "razorpay_signature": "mock_signature_abc"
+    }
+  }
+}

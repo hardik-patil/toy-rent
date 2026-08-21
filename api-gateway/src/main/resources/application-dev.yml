@@ -1,0 +1,6 @@
+logging:
+  level:
+    com.toyrental: DEBUG
+    org.springframework.cloud.gateway: DEBUG
+    org.springframework.security: DEBUG
+    reactor.netty.http.client: INFO
