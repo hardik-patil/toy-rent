@@ -1210,9 +1210,9 @@ Claude Code must NOT pre-fix these. They are found via JMeter tests.
 |---|---|---|
 | S1 — Infrastructure | ✅ Complete | 6/6 |
 | S2 — Toy Service | ✅ Complete | 9/9 |
-| S3 — Booking Service | ⬜ Not started | 0/10 |
-| S4 — Kafka Pipeline | ⬜ Not started | 0/10 |
-| S5 — Month-End Report | ⬜ Not started | 0/8 |
+| S3 — Booking Service | ✅ Complete | 10/10 |
+| S4 — Kafka Pipeline | ✅ Complete | 10/10 |
+| S5 — Month-End Report | ✅ Complete | 8/8 |
 | S6 — Observability | ⬜ Not started | 0/7 |
 | S7 — Performance Eng | ⬜ Not started | 0/8 |
 | S8 — Kubernetes | ⬜ Not started | 0/7 |
@@ -1236,6 +1236,10 @@ Format: date, service, description, root cause, fix applied.
 | 2026-08-21 | toy-service | Kafka consumers couldn't deserialize events from another service | No `spring.json.value.default.type` set, so `JsonDeserializer` needed a `__TypeId__` header matching a class on this service's own classpath | Set `spring.json.use.type.headers: false` + `spring.json.value.default.type` to the envelope class |
 | 2026-08-21 | infra | `toydb`/`bookingdb` and their users were never created on a fresh Postgres container | `docker/postgres-init/init-databases.sh` was committed without the executable bit, so `docker-entrypoint-initdb.d` skipped it with "bad interpreter: Permission denied" | `chmod +x` the script |
 | 2026-08-21 | infra | `docker compose up kafka` failed to pull the image | `bitnami/kafka:3.7` (and the entire `bitnami/kafka` repo) was removed from Docker Hub in Bitnami's 2025 catalog restructuring | Switched to the official `apache/kafka:3.7.2` image at the same pinned version line |
+| 2026-08-22 | booking-service | Customer registration crashed with a Postgres error | `"cust-" + UUID.randomUUID()` is 41 characters; every id column is `VARCHAR(36)` | Shared `IdGenerator.shortId(prefix)` (prefix + first 8 hex chars of a UUID) in both services |
+| 2026-08-22 | booking-service | `createdAt` came back `null` on the same response that created the row | Two layers: `@CreationTimestamp` only populates at flush, which plain `save()` defers to commit; and once switched to `saveAndFlush()`, these entities' manually-assigned ids route Spring Data through `merge()` (returns a different object) instead of `persist()` | `saveAndFlush()`, with the return value reassigned: `booking = bookingRepository.saveAndFlush(booking)` |
+| 2026-08-22 | booking-service | One payment webhook call left a booking with `SUCCESS` payments but `PENDING` status | WireMock's Razorpay stub returns the same static order id for every order; the webhook handler only confirmed the first booking found among matched payments | Group matched payments by distinct `bookingId` and confirm every one found |
+| 2026-08-22 | booking-service | A new Kafka consumer group spun at CPU speed, filling the disk to 100% capacity (19GB log file in under a minute) | No `ErrorHandlingDeserializer` wrapping the value deserializer, so a leftover headerless test message threw a raw `SerializationException` at Kafka's poll loop — entirely outside `DefaultErrorHandler`'s retry/backoff | Wrapped both services' Kafka value deserializers in `ErrorHandlingDeserializer` |
 
 ---
 

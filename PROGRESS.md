@@ -400,3 +400,261 @@ works end-to-end against live infra rather than just compiling.
 - Sprint 3 (booking-service) not started — `InternalToyController` and the
   `BookingEventEnvelope`/`BookingEventPayload` shape are ready for it to
   build against.
+
+---
+
+## Session 3 — 2026-08-22 — Sprint 3: Booking Service, Sprint 4: Kafka Pipeline
+
+**Goal:** Build booking-service from scratch (Sprint 1 had only scaffolded
+its pom/config/Flyway migrations), then wire the Kafka pipeline properly —
+topic provisioning, notification/overdue/month-end-skeleton consumers —
+across both services.
+
+### Sprint 3 — Booking Service
+
+Before writing code, asked the user to resolve a real architectural fork:
+CLAUDE.md's `application.yml` validates JWTs against a Keycloak issuer-uri
+(same as toy-service), but `customers.password_hash` exists and no Keycloak
+realm is provisioned. User picked self-issued RSA JWTs
+(`NimbusJwtEncoder`/`Decoder`, transitively already on the classpath via the
+approved oauth2-resource-server starter — no new dependency) over building
+Keycloak realm/Admin-API integration first.
+
+Built: `Customer`/`Booking`/`Payment`/`Notification` entities and their
+enums (plus an undocumented-but-necessary `NotificationStatus`), repositories
+including a pessimistic-lock overlap query for the booking-creation race,
+`CustomerService`/`JwtTokenService` (register/login), `BookingService` (the
+full CLAUDE.md "Booking Flow — Critical Logic" — availability check via
+Feign, insert-then-lock overlap guard, Razorpay order creation embedded in
+the same transaction), `PaymentService` (webhook handling, deposit-only
+refund — rental and deposit are tracked as separate payment rows sharing one
+Razorpay order, since the schema's `refund_id`/`refunded_at` columns only
+make sense against a single row), `NotificationService` (built standalone,
+not yet wired to any trigger), `PdfGeneratorService` (iText booking
+receipts), `ToyServiceClient`/`RazorpayClient`/`WhatsAppClient` (Feign),
+self-issued-JWT `SecurityConfig`, and 19 unit tests.
+
+Bugs found via live validation (register → login → book → pay → confirm →
+receipt → cancel, against real Postgres/Couchbase/Kafka/WireMock):
+- Customer registration crashed with a genuine Postgres error:
+  `"cust-" + UUID.randomUUID()` is 41 characters against a `VARCHAR(36)`
+  column — the exact same pattern was already live and unexercised in
+  toy-service's `ToyService.create()`. Fixed with a shared
+  `IdGenerator.shortId(prefix)` (prefix + first 8 hex chars of a UUID) in
+  both services.
+- `createdAt` came back `null` on the very response that created the row —
+  diagnosed in two layers, not one. First: Hibernate's `@CreationTimestamp`
+  only populates at flush, which a plain `save()` inside `@Transactional`
+  defers to commit. Fixed with `saveAndFlush()` — except it *still* came
+  back null, because these entities assign their own id (no
+  `@GeneratedValue`), so Spring Data's `isNew()` check sees a non-null id
+  and routes through `entityManager.merge()` rather than `persist()` —
+  `merge()` returns a different managed instance than the one passed in.
+  The actual fix was reassigning the return value:
+  `booking = bookingRepository.saveAndFlush(booking)`.
+- One webhook call could leave a booking with successful payments but a
+  still-`PENDING` status: WireMock's Razorpay stub returns the same static
+  order id for every order, so two bookings created close together
+  genuinely shared one; the handler only confirmed the *first* booking
+  found among matched payments. Caught live via `psql` showing exactly that
+  inconsistency. Fixed by grouping matched payments by distinct
+  `bookingId` and confirming every one found — re-verified by deliberately
+  creating two simultaneously-pending bookings sharing one order id and
+  firing a single webhook call; both correctly flipped to `CONFIRMED`.
+
+### Sprint 4 — Kafka Pipeline
+
+Added explicit `NewTopic` provisioning in both services, pinned at 1
+partition per topic — CLAUDE.md's topic reference table shows 3/6, but the
+Performance Engineering section lists single-partition Kafka as an
+intentional Sprint 7 bottleneck, not something to pre-fix now, the same
+precedent as Sprint 1's unfixed index and Hikari pool size. Added the
+`CorrelationIdFilter` toy-service had been missing since Sprint 2 (verified
+via the log pattern's correlationId prefix, not just the response header —
+`ToyController` doesn't actually log anything at INFO for a plain GET, so
+the response-header check alone would have been weaker evidence).
+
+Added to booking-service: a `processed_events` idempotency table (mirroring
+toy-service's), `PaymentEventProducer`/`Consumer` (payment.success/failed —
+explicitly scoped as a supplementary audit trail, not a replacement for the
+synchronous webhook confirmation already built and validated in Sprint 3),
+`BookingNotificationConsumer` (booking-service's own consumption of its
+booking.confirmed/cancelled/overdue topics under consumer group
+`notification-cg`, finally wiring the standalone `NotificationService` to a
+real trigger), `OverdueDetectionService` (`@Scheduled`, ACTIVE bookings past
+`end_date` → OVERDUE + `booking.overdue`), and a Sprint-4 skeleton
+`MonthEndTriggerConsumer` (idempotency + a `GENERATING` placeholder in both
+Postgres and Couchbase; full aggregation deferred to Sprint 5).
+
+**Serious incident during live validation:** booking-service's first-ever
+consumer group (`notification-cg`) started at `auto-offset-reset: earliest`
+and hit a leftover headerless test message on `booking.confirmed` from
+Sprint 2's manual `kafka-console-producer` testing. Neither service's
+`KafkaConsumerConfig` wrapped the value deserializer in
+`ErrorHandlingDeserializer`, so the deserialization failure threw a raw
+`SerializationException` at Kafka's poll loop — entirely outside
+`DefaultErrorHandler`'s retry/backoff, which can only handle exceptions
+thrown *from* a listener invocation, not from failing to construct the
+record in the first place. The consumer re-fetched and re-failed the same
+record as fast as the CPU allowed: caught once at 2.5 million log lines in
+under 10 seconds, but a first, uncaught occurrence had already produced a
+**19.2 GB log file** and driven this Mac's disk to **100% capacity with
+under 600 MB free** before being noticed via a routine disk-usage check.
+Killed the runaway process immediately, deleted the log, confirmed the
+runaway wasn't caused by accumulated stale test data (checked — only 5
+bookings and 0 stray pending payments existed at the time), then
+root-caused and fixed by wrapping both services' Kafka value deserializers
+in `ErrorHandlingDeserializer`. Re-verified by restarting under a tight
+line-count monitor (killing automatically past 100k lines): stable at
+~950 lines, and the consumer group's offset had cleanly advanced past the
+poison record (0 → 7, zero lag) rather than getting stuck.
+
+Also found and fixed live: republishing the exact same
+`month.end.trigger` test message without a `__TypeId__` Kafka header
+(hand-crafted via `kafka-console-producer`, which doesn't add headers)
+correctly got dead-lettered by the new `ErrorHandlingDeserializer` instead
+of looping — confirming the fix generalizes beyond the one incident, not
+just patching the specific message that caused it.
+
+Validated end-to-end: 14 topics provisioned at the correct partition count,
+a real booking → webhook → `PAYMENT_SUCCESS` audit event →
+`BOOKING_CONFIRMED` WhatsApp notification (visible as a `SENT` row in
+`notifications`), cancellation producing a matching `BOOKING_CANCELLED`
+notification, a SQL-simulated overdue booking correctly detected by the
+scheduled job and reminded, idempotent month-end-trigger handling (exact
+duplicate `eventId`; a different `eventId` for the same month/year — both
+independently confirmed via the Couchbase/Postgres idempotency checks), and
+401 enforcement on the admin trigger endpoint. Full suites: 15/15
+toy-service, 33/34 booking-service (only the pre-existing environmental
+context-load failure). Committed as `fe91e48`.
+
+**Not done in this session:**
+- Keycloak realm still not imported — admin-role testing throughout remains
+  limited to "no token → 401"; no test yet asserts an authenticated
+  non-admin request is correctly rejected with 403.
+- Sprint 5 (month-end report) not started — `MonthEndTriggerConsumer` is
+  still the Sprint 4 skeleton (idempotency + placeholder only, no
+  aggregation/PDF/MinIO).
+
+---
+
+## Session 4 — 2026-08-22 — Sprint 5: Month-End Report
+
+**Goal:** Turn Sprint 4's `MonthEndTriggerConsumer` skeleton into the full
+CLAUDE.md "Month-End Report Flow" — real aggregation, a PDF, a MinIO upload,
+and `monthly.report.generated`.
+
+### Steps
+
+1. Added `BookingRepository.findByStartDateBetweenAndStatusIn(...)` and
+   `ReportService`, which aggregates bookings whose `start_date` falls in
+   the target month and that actually materialized
+   (`CONFIRMED`/`ACTIVE`/`RETURNED`/`OVERDUE` — excluding `PENDING`, never
+   paid, and `CANCELLED`, didn't happen): total bookings, total revenue
+   (sum of `rentalAmount`), total deposits held, pending returns (still
+   `ACTIVE`/`OVERDUE`), the top-rented toy (name resolved via a live Feign
+   call back to toy-service, since booking-service doesn't own toy names),
+   and revenue grouped by week-of-month.
+
+2. Extended `PdfGeneratorService` with `generateMonthlyReportPdf` and a
+   second `pdf.generation.duration` Timer instance tagged
+   `type=monthly_report` (the existing one, tagged `booking_receipt`,
+   stays as-is — Micrometer needs two distinct `Timer` objects, not one
+   reused across tag values).
+
+3. Added `MinioConfig`/`MinioService` — `MinioClient` bean from the
+   already-scaffolded `minio.*` properties, uploading to
+   `reports/{yyyy}/{MM}/monthly-report-{yyyy}-{MM}.pdf`, creating the
+   bucket defensively if the `minio-init` Compose sidecar hasn't run yet.
+
+4. Extended `MonthlyReportDocument` from Sprint 4's skeleton fields to the
+   full shape CLAUDE.md documents (nested `TopToy`, `RevenueByWeek`,
+   `pdfStoragePath`), and rewrote `MonthEndTriggerConsumer` to the complete
+   flow: idempotency → `GENERATING` placeholder → aggregate → generate PDF
+   → upload to MinIO → `SUCCESS` in both Postgres and Couchbase →
+   `monthly.report.generated`. A generation failure (aggregation, PDF, or
+   MinIO) is caught and recorded as a `FAILED` row with a
+   `monthly.report.generated` event of its own, rather than left stuck at
+   `GENERATING` forever or retried into a loop.
+
+5. Added `MonthlyReportGeneratedEnvelope`/`Payload`/`Producer` (keyed by
+   `month-year`, matching CLAUDE.md's topic table; no consumers yet — the
+   table marks this topic "(future)").
+
+6. Extended `AdminReportController` with list/detail/PDF-download, and a
+   `ReportNotFoundException` → 404 mapping in `GlobalExceptionHandler`.
+
+7. Wrote `ReportServiceTest` (aggregation correctness, including a
+   toy-service-lookup-failure fallback), rewrote `MonthEndTriggerConsumerTest`
+   for the full flow (added a report-generation-failure case), and added
+   `AdminReportControllerTest`.
+
+   **Bug found while writing that last test:** the first assertion that a
+   non-admin authenticated request gets 403 instead came back 202 — because
+   `@WebMvcTest(controllers = AdminReportController.class)` doesn't load the
+   project's own `SecurityConfig`, so Spring Security's default
+   "any authenticated request passes" applied instead of the real
+   `hasRole("ADMIN")` rule. Every other controller test in this codebase has
+   the same gap (untested), just never exercised it because none of them
+   previously asserted role-based rejection, only "no token at all →
+   401/403". Fixed *this* test with `@Import({SecurityConfig.class,
+   JwtKeyConfig.class})`; the same fix should be applied to
+   `AdminBookingControllerTest`/`BookingControllerTest` if role-specific
+   assertions are ever added there.
+
+8. Compiled clean, ran the new/updated tests (8 passing), then the full
+   suite (41/42 — only the known environmental context-load failure).
+
+### Live validation
+
+9. Brought up `minio` + `minio-init` (the sidecar creates the
+   `toy-rental-reports` bucket automatically via `mc mb --ignore-existing`
+   — confirmed in its logs). Restarted booking-service under the same
+   tight line-count monitor Sprint 4's incident established as standard
+   practice before any first-time-code-path Kafka consumer run; stable.
+
+10. Created three real bookings across two toys (two for `toy-001`, one for
+    `toy-002`) in December 2026, confirmed each via the payment webhook.
+    Postgres already had a fourth booking left over from Sprint 4's
+    overdue-detection test (`toy-008`, status `OVERDUE`, `start_date`
+    2026-12-01) — deliberately left in place rather than cleaned up, since
+    it's a legitimate test of whether the aggregation query correctly
+    includes `OVERDUE` bookings alongside `CONFIRMED` ones.
+
+11. Published a hand-crafted `month.end.trigger` message (with an explicit
+    `__TypeId__` header this time, learned from Sprint 4's incident) for
+    month=12, year=2026. The consumer resolved `toy-001`'s name via a real
+    Feign call to toy-service and completed successfully. Verified against
+    hand-computed expected values — total bookings 4, total revenue
+    ₹1,196.00, total deposits ₹5,100.00, pending returns 1, top toy
+    `toy-001`/"LEGO Technic 42155" with 2 rentals, revenue by week
+    [548, 449, 199] — and every one matched exactly, in both the Postgres
+    row and the Couchbase document (which matches CLAUDE.md's example
+    shape field-for-field).
+
+12. Confirmed the PDF is genuinely in MinIO (`mc ls` inside a throwaway
+    `minio/mc` container, since this Mac has no `mc` CLI installed
+    locally) — 1.6 KB at the expected path.
+
+13. Tested both idempotency paths independently: republishing the identical
+    `eventId` → "Skipping already-processed"; publishing a *different*
+    `eventId` for the same month/year → "Skipping ... report already
+    exists in Couchbase". Both correctly left exactly one row in
+    `monthly_reports`.
+
+14. Ran the full suite one final time: 41/42 (same known environmental
+    failure). Updated `SPRINTS.md`/`CLAUDE.md`'s sprint trackers and
+    `CLAUDE.md`'s Known Bugs table for Sprints 3–5 (had been skipped after
+    Session 3's commit — Sprint 2 got this treatment immediately, Sprint
+    3/4 didn't, catching up now).
+
+**Not done in this session:**
+- Keycloak realm still not imported.
+- `monthly.report.generated` has no consumer yet (matches CLAUDE.md's
+  topic table, which marks it "(future)").
+- Sprint 6 (Observability) not started — the custom Prometheus metrics
+  CLAUDE.md documents are wired into code as they've come up
+  (`toy.availability.cache.*`, `booking.created.total`,
+  `booking.conflict.total`, `payment.success/failed.total`,
+  `pdf.generation.duration`, `monthly.report.generated.total`), but no
+  Grafana dashboards or alerting rules exist yet.

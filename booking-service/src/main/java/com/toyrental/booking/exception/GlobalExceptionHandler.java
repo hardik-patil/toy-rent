@@ -27,6 +27,11 @@ public class GlobalExceptionHandler {
         return respond(HttpStatus.NOT_FOUND, "CUSTOMER_NOT_FOUND", ex.getMessage(), request, true);
     }
 
+    @ExceptionHandler(ReportNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleReportNotFound(ReportNotFoundException ex, HttpServletRequest request) {
+        return respond(HttpStatus.NOT_FOUND, "REPORT_NOT_FOUND", ex.getMessage(), request, true);
+    }
+
     @ExceptionHandler(ToyNotAvailableException.class)
     public ResponseEntity<ErrorResponse> handleToyNotAvailable(ToyNotAvailableException ex, HttpServletRequest request) {
         return respond(HttpStatus.CONFLICT, "TOY_NOT_AVAILABLE", ex.getMessage(), request, true);

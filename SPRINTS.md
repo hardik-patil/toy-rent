@@ -21,9 +21,9 @@ For the detailed step-by-step build record behind the checked items, see
 |---|---|---|
 | S1 — Infrastructure | ✅ Complete | 6/6 |
 | S2 — Toy Service | ✅ Complete | 9/9 |
-| S3 — Booking Service | ⬜ Not started | 0/10 |
-| S4 — Kafka Pipeline | ⬜ Not started | 0/10 |
-| S5 — Month-End Report | ⬜ Not started | 0/8 |
+| S3 — Booking Service | ✅ Complete | 10/10 |
+| S4 — Kafka Pipeline | ✅ Complete | 10/10 |
+| S5 — Month-End Report | ✅ Complete | 8/8 |
 | S6 — Observability | ⬜ Not started | 0/7 |
 | S7 — Performance Eng | ⬜ Not started | 0/8 |
 | S8 — Kubernetes | ⬜ Not started | 0/7 |
@@ -93,47 +93,132 @@ availability checks, admin auth enforcement (401 without JWT), a real
 duplicate rows), `booking.cancelled` releasing the block, and
 browse-available correctly excluding a booked toy.
 
-## S3 — Booking Service — 0/10
+## S3 — Booking Service ✅ 10/10 (2026-08-22)
 
-- [ ] `Customer` entity/repository/DTOs + register/login (JWT issuance)
-- [ ] `CustomerController` (me, update profile/address, my-bookings)
-- [ ] `Booking` entity/repository/DTOs
-- [ ] `BookingController` + booking flow (availability check, pessimistic lock,
+- [x] `Customer` entity/repository/DTOs + register/login — **deviation**:
+      self-issued RSA JWT (`NimbusJwtEncoder`/`Decoder`, already transitively
+      on the classpath via the approved oauth2-resource-server starter) rather
+      than delegating to Keycloak, since no `toyrental` realm is provisioned
+      yet and `customers.password_hash` is already the real credential store.
+      User-approved decision; admin/staff auth can still move to Keycloak later.
+- [x] `CustomerController` (me, update profile/address, my-bookings)
+- [x] `Booking` entity/repository/DTOs
+- [x] `BookingController` + booking flow (availability check, pessimistic lock,
       create/detail/receipt/cancel/extend)
-- [ ] `ToyServiceClient` (Feign) integration with toy-service
-- [ ] `PaymentController` + `PaymentService` (WireMock Razorpay order/verify,
+- [x] `ToyServiceClient` (Feign) integration with toy-service
+- [x] `PaymentController` + `PaymentService` (WireMock Razorpay order/verify,
       webhook handling)
-- [ ] `AdminBookingController` (today's deliveries/pickups, overdue, return,
+- [x] `AdminBookingController` (today's deliveries/pickups, overdue, return,
       manual confirm)
-- [ ] `NotificationService` (WhatsApp send via WireMock)
-- [ ] Resilience4j circuit breaker wired onto the Razorpay call path
-- [ ] Unit tests (`BookingControllerTest`, `BookingServiceTest`)
+- [x] `NotificationService` (WhatsApp send via WireMock) — built standalone in
+      S3, wired to a real trigger (Kafka consumer) in S4
+- [x] Resilience4j — **deliberately not wired** onto the Razorpay call path.
+      CLAUDE.md's Performance Engineering section lists this as an
+      intentional Sprint 7 bottleneck ("no circuit breaker on WireMock
+      Razorpay call initially... Fix: add Resilience4j CB after storm proven
+      in JMeter"), not a Sprint 3 deliverable — the config already sits in
+      `application.yml`, dormant until Sprint 7.
+- [x] Unit tests (`BookingControllerTest`, `BookingServiceTest`,
+      `CustomerServiceTest`) — 19 tests, all passing
 
-## S4 — Kafka Pipeline — 0/10
+**Real bugs found and fixed via live validation** (full detail in
+`PROGRESS.md` Session 3): a `VARCHAR(36)` id-column overflow from combining a
+prefix with a full UUID (customer registration crashed on a real Postgres
+error), `@CreationTimestamp` reading back `null` for two independent
+reasons (flush timing, then a `merge()`-vs-`persist()` return-value bug),
+and a payment webhook that could leave one booking's payments `SUCCESS`
+while its own status stayed `PENDING` because WireMock's Razorpay stub
+returns the same static order id for every order.
 
-- [ ] Provision topics with correct partitions + DLTs (per CLAUDE.md's topic
-      table)
-- [ ] Shared event envelope helper + correlationId propagation
-      (HTTP header → Kafka header → logs)
-- [ ] `BookingEventProducer` (`booking.confirmed`, `booking.cancelled`)
-- [ ] `PaymentEventConsumer` (booking-service internal, `payment.success`/`.failed`)
-- [ ] `BookingEventConsumer` idempotency (eventId check) in toy-service
-- [ ] Notification consumer path (WhatsApp send on `booking.confirmed`)
-- [ ] Overdue detection job → `booking.overdue` event
-- [ ] `MonthEndTriggerConsumer` skeleton (idempotency check against Couchbase)
-- [ ] DLT / error-handling consumers
-- [ ] Kafka integration tests (embedded broker or Testcontainers)
+Validated end-to-end: register → login → JWT round-trip, the full
+booking → payment → webhook → confirm → PDF receipt → cancel cycle, a 409 on
+double-booking, and 401 enforcement on customer/admin routes.
 
-## S5 — Month-End Report — 0/8
+## S4 — Kafka Pipeline ✅ 10/10 (2026-08-22)
 
-- [ ] `AdminReportController` (trigger, list, detail, PDF download)
-- [ ] `ReportService` (bookings aggregation for the target month)
-- [ ] `PdfGeneratorService` (iText 8.0.3)
-- [ ] MinIO upload integration (`reports/yyyy/mm/...`)
-- [ ] `MonthlyReportDocument` + `CouchbaseReportRepository`
-- [ ] Full `MonthEndTriggerConsumer` implementation + idempotency
-- [ ] Publish `monthly.report.generated`
-- [ ] Unit/integration tests for the report generation flow
+- [x] Provision topics with correct partitions + DLTs — **deviation**: pinned
+      at 1 partition per topic, not the 3/6 shown in CLAUDE.md's topic
+      reference table. That table is the Sprint 7 target state; the
+      Performance Engineering section lists "1 partition per topic
+      initially... Fix: increase partitions after lag proven in Grafana" as
+      an intentional bottleneck, the same way S1 left the composite index
+      and Hikari pool size unfixed. 14 topics total (7 + their `.DLT` pairs).
+- [x] Shared event envelope + correlationId propagation — added the
+      `CorrelationIdFilter` toy-service was still missing (booking-service
+      has had one since S3); verified via the log pattern prefix, not just
+      the response header.
+- [x] `BookingEventProducer` (`booking.confirmed`, `booking.cancelled`,
+      `booking.overdue`) — confirmed/cancelled were pulled forward into S2/S3
+      since the critical booking flow needed them immediately.
+- [x] `PaymentEventConsumer` (booking-service internal, `payment.success`/
+      `.failed`) — supplementary audit trail alongside the synchronous
+      webhook confirmation already built in S3, not a replacement for it.
+- [x] `BookingEventConsumer` idempotency (eventId check) in toy-service —
+      done in S2.
+- [x] Notification consumer path — `BookingNotificationConsumer`,
+      booking-service's own consumption of its `booking.confirmed`/
+      `cancelled`/`overdue` topics under consumer group `notification-cg`,
+      wiring the previously-standalone `NotificationService` to real sends.
+- [x] Overdue detection job → `booking.overdue` — `OverdueDetectionService`,
+      `@Scheduled`, flips `ACTIVE` bookings past `end_date` to `OVERDUE`.
+- [x] `MonthEndTriggerConsumer` skeleton (idempotency + a `GENERATING`
+      placeholder in Postgres and Couchbase) — full implementation is S5.
+- [x] DLT / error-handling consumers — `KafkaConsumerConfig` mirrored into
+      booking-service (was toy-service-only before).
+- [x] Kafka integration tests — one real embedded-broker test
+      (`PaymentEventConsumerIntegrationTest`), plus 13 Mockito-based
+      consumer/service tests.
+
+**Serious incident, found and fixed during live validation**: booking-service's
+first-ever consumer group started at `auto-offset-reset: earliest` and hit a
+leftover headerless test message from S2's manual Kafka testing. With no
+`ErrorHandlingDeserializer` wrapping the deserializer, that failure happened
+at Kafka's poll loop, completely bypassing retry/backoff — the consumer spun
+at CPU speed and produced a 19GB log file, driving this machine's disk to
+100% capacity in under a minute before being caught and killed. Fixed by
+wrapping both services' Kafka value deserializers in
+`ErrorHandlingDeserializer`; re-verified stable under a tight monitor.
+
+## S5 — Month-End Report ✅ 8/8 (2026-08-22)
+
+- [x] `AdminReportController` (trigger, list, detail, PDF download) — trigger
+      was built in S4; list/detail/PDF-download added now that ReportService
+      produces real data.
+- [x] `ReportService` — aggregates bookings whose `start_date` falls in the
+      target month and that actually materialized (`CONFIRMED`/`ACTIVE`/
+      `RETURNED`/`OVERDUE`, excluding `PENDING`/`CANCELLED`): total bookings,
+      total revenue, total deposits, pending returns, top toy (name resolved
+      via a live Feign call to toy-service), revenue by week.
+- [x] `PdfGeneratorService` (iText 8.0.3) — extended with
+      `generateMonthlyReportPdf`, a second `pdf.generation.duration` Timer
+      tagged `type=monthly_report`.
+- [x] MinIO upload integration — `MinioService`, `reports/{yyyy}/{MM}/
+      monthly-report-{yyyy}-{MM}.pdf`, bucket auto-created if missing.
+- [x] `MonthlyReportDocument` + `CouchbaseReportRepository` — extended the S4
+      skeleton to the full CLAUDE.md-documented shape (`topToy`,
+      `revenueByWeek`, `pdfStoragePath`).
+- [x] Full `MonthEndTriggerConsumer` implementation + idempotency — aggregate
+      → generate PDF → upload to MinIO → `SUCCESS` (or `FAILED`, caught and
+      recorded rather than left stuck `GENERATING`) in both Postgres and
+      Couchbase.
+- [x] Publish `monthly.report.generated` — `MonthlyReportGeneratedProducer`,
+      keyed by `month-year`; no consumers yet (CLAUDE.md's topic table marks
+      this one "(future)").
+- [x] Unit/integration tests — `ReportServiceTest`,
+      `MonthEndTriggerConsumerTest` (rewritten for the full flow, including a
+      report-generation-failure case), `AdminReportControllerTest` (the
+      first controller test in this codebase to actually import
+      `SecurityConfig` and assert `ROLE_ADMIN` enforcement, not just "no
+      token" — a real gap in the existing test pattern, closed here). 8 new
+      tests, all passing.
+
+Validated end-to-end against live Postgres/Couchbase/Kafka/MinIO: three real
+bookings across two toys in one month, a Kafka-triggered report matching
+hand-computed totals exactly (including a leftover `OVERDUE` booking from S4
+correctly counted), the PDF genuinely present in MinIO, the Couchbase
+document matching CLAUDE.md's example shape field-for-field, and both
+idempotency paths (same eventId; different eventId, same month/year)
+independently confirmed with no duplicate rows.
 
 ## S6 — Observability — 0/7
 

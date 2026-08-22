@@ -46,4 +46,7 @@ public interface BookingRepository extends JpaRepository<Booking, String> {
 
     Page<Booking> findByStatusAndEndDateBefore(BookingStatus status, LocalDate endDate, Pageable pageable);
 
+    /** Month-end report aggregation: bookings that actually materialized (not PENDING/CANCELLED) starting in the target month. */
+    List<Booking> findByStartDateBetweenAndStatusIn(LocalDate startDateFrom, LocalDate startDateTo, List<BookingStatus> statuses);
+
 }
