@@ -1,6 +1,7 @@
 package com.toyrental.toy.controller;
 
 import com.toyrental.toy.dto.PagedResponse;
+import com.toyrental.toy.dto.ToyMetadataResponse;
 import com.toyrental.toy.dto.ToyResponse;
 import com.toyrental.toy.service.ToyService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -52,6 +53,12 @@ public class ToyController {
     @GetMapping("/categories")
     public List<String> categories() {
         return toyService.getCategories();
+    }
+
+    @Operation(summary = "Categories, age groups, conditions and statuses — for populating admin form dropdowns/radio groups")
+    @GetMapping("/metadata")
+    public ToyMetadataResponse metadata() {
+        return toyService.getMetadata();
     }
 
 }

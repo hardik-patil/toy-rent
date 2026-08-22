@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
         - name: api-gateway
-          image: toyrental/api-gateway:1.0.3
+          image: toyrental/api-gateway:1.0.4
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -49,13 +49,13 @@ spec:
             httpGet:
               path: /actuator/health/liveness
               port: 8080
-            initialDelaySeconds: 60
+            initialDelaySeconds: 150
             periodSeconds: 15
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
               port: 8080
-            initialDelaySeconds: 30
+            initialDelaySeconds: 120
             periodSeconds: 10
 
 ---

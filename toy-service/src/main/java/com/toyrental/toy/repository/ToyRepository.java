@@ -30,6 +30,9 @@ public interface ToyRepository extends JpaRepository<Toy, String> {
     @Query("SELECT DISTINCT t.category FROM Toy t WHERE t.active = true ORDER BY t.category")
     List<String> findDistinctCategories();
 
+    @Query("SELECT DISTINCT t.ageGroup FROM Toy t WHERE t.active = true ORDER BY t.ageGroup")
+    List<String> findDistinctAgeGroups();
+
     Page<Toy> findByActiveTrueAndStatusNot(ToyStatus status, Pageable pageable);
 
     Page<Toy> findByActiveTrueAndStatus(ToyStatus status, Pageable pageable);

@@ -1,5 +1,6 @@
 package com.toyrental.toy.service;
 
+import com.toyrental.toy.dto.ToyMetadataResponse;
 import com.toyrental.toy.dto.ToyRequest;
 import com.toyrental.toy.dto.ToyResponse;
 import com.toyrental.toy.entity.Toy;
@@ -54,6 +55,11 @@ public class ToyService {
     @Transactional(readOnly = true)
     public List<String> getCategories() {
         return toyRepository.findDistinctCategories();
+    }
+
+    @Transactional(readOnly = true)
+    public ToyMetadataResponse getMetadata() {
+        return ToyMetadataResponse.of(toyRepository.findDistinctCategories(), toyRepository.findDistinctAgeGroups());
     }
 
     @Transactional(readOnly = true)

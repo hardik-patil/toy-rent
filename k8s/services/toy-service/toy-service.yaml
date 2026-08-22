@@ -15,6 +15,8 @@ type: Opaque
 stringData:
   POSTGRES_PASSWORD: toypass
   COUCHBASE_PASSWORD: password
+  MINIO_ACCESS_KEY: minioadmin
+  MINIO_SECRET_KEY: minioadmin
 
 ---
 apiVersion: apps/v1
@@ -42,7 +44,7 @@ spec:
     spec:
       containers:
         - name: toy-service
-          image: toyrental/toy-service:1.0.3
+          image: toyrental/toy-service:1.0.4
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8081
@@ -69,6 +71,22 @@ spec:
               value: kafka.infra.svc.cluster.local:9092
             - name: BOOKING_SERVICE_JWK_SET_URI
               value: http://booking-service.toy-rental.svc.cluster.local:8082/oauth2/jwks
+            - name: MINIO_ENDPOINT
+              value: http://minio.infra.svc.cluster.local:9000
+            # No MINIO_PUBLIC_ENDPOINT override here — the localhost:9000 default in
+            # application.yml is correct for wherever the frontend/browser actually runs,
+            # via `kubectl port-forward svc/minio 9000:9000`. The in-cluster DNS name above
+            # is only for toy-service's own upload connection, never resolvable from a browser.
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: toy-service-secret
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: toy-service-secret
+                  key: MINIO_SECRET_KEY
             - name: ZIPKIN_ENDPOINT
               value: http://zipkin.monitoring.svc.cluster.local:9411/api/v2/spans
           resources:
@@ -82,13 +100,13 @@ spec:
             httpGet:
               path: /actuator/health/liveness
               port: 8081
-            initialDelaySeconds: 60
+            initialDelaySeconds: 150
             periodSeconds: 15
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
               port: 8081
-            initialDelaySeconds: 30
+            initialDelaySeconds: 120
             periodSeconds: 10
 
 ---

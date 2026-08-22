@@ -9,6 +9,8 @@ type: Opaque
 stringData:
   POSTGRES_PASSWORD: {{ .Values.secrets.postgres.toyServicePassword | quote }}
   COUCHBASE_PASSWORD: {{ .Values.secrets.couchbasePassword | quote }}
+  MINIO_ACCESS_KEY: {{ .Values.secrets.minio.accessKey | quote }}
+  MINIO_SECRET_KEY: {{ .Values.secrets.minio.secretKey | quote }}
 
 ---
 apiVersion: apps/v1
@@ -57,6 +59,18 @@ spec:
               value: kafka.{{ .Values.infraNamespace }}.svc.cluster.local:9092
             - name: BOOKING_SERVICE_JWK_SET_URI
               value: http://booking-service.{{ .Values.namespace }}.svc.cluster.local:8082/oauth2/jwks
+            - name: MINIO_ENDPOINT
+              value: http://minio.{{ .Values.infraNamespace }}.svc.cluster.local:9000
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: toy-service-secret
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: toy-service-secret
+                  key: MINIO_SECRET_KEY
             - name: ZIPKIN_ENDPOINT
               value: http://zipkin.{{ .Values.monitoringNamespace }}.svc.cluster.local:9411/api/v2/spans
           resources:

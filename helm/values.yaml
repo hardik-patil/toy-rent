@@ -10,7 +10,7 @@ infraNamespace: infra
 monitoringNamespace: monitoring
 
 image:
-  tag: "1.0.3"
+  tag: "1.0.4"
   pullPolicy: IfNotPresent
 
 apiGateway:
@@ -64,14 +64,18 @@ bookingService:
     maxReplicas: 8
     cpuUtilization: 60
 
+# initialDelaySeconds raised from 60/30 → 150/120: under CPU throttling on this
+# dev node (single-node Docker Desktop k8s, no headroom), JVM startup can take
+# 2+ minutes instead of the normal ~20s, and the tighter delays were killing
+# pods (exit 137) mid-startup before Tomcat ever bound the port.
 probes:
   liveness:
     path: /actuator/health/liveness
-    initialDelaySeconds: 60
+    initialDelaySeconds: 150
     periodSeconds: 15
   readiness:
     path: /actuator/health/readiness
-    initialDelaySeconds: 30
+    initialDelaySeconds: 120
     periodSeconds: 10
 
 # Dev-only credentials matching docker-compose.yml's existing plaintext

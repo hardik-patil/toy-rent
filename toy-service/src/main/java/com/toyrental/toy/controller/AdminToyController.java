@@ -5,6 +5,7 @@ import com.toyrental.toy.dto.ToyConditionRequest;
 import com.toyrental.toy.dto.ToyImageRequest;
 import com.toyrental.toy.dto.ToyRequest;
 import com.toyrental.toy.dto.ToyResponse;
+import com.toyrental.toy.service.MinioService;
 import com.toyrental.toy.service.ToyService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -18,8 +19,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @Tag(name = "Toys Admin", description = "Admin-only toy catalogue management (requires ROLE_ADMIN)")
 @RestController
@@ -27,9 +30,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminToyController {
 
     private final ToyService toyService;
+    private final MinioService minioService;
 
-    public AdminToyController(ToyService toyService) {
+    public AdminToyController(ToyService toyService, MinioService minioService) {
         this.toyService = toyService;
+        this.minioService = minioService;
     }
 
     @Operation(summary = "Add a toy")
@@ -52,12 +57,23 @@ public class AdminToyController {
         toyService.softDelete(toyId);
     }
 
-    @Operation(summary = "Upload an image for a toy")
+    @Operation(summary = "Add an image for a toy by URL (image already hosted elsewhere)")
     @PostMapping("/toys/{toyId}/images")
     @ResponseStatus(HttpStatus.CREATED)
     public ToyResponse.ToyImageResponse addImage(@PathVariable String toyId,
                                                    @Valid @RequestBody ToyImageRequest request) {
         return toyService.addImage(toyId, request.url(), request.primary(), request.sortOrder());
+    }
+
+    @Operation(summary = "Upload a photo file for a toy (multipart) — stored in MinIO, publicly readable")
+    @PostMapping(value = "/toys/{toyId}/images/upload", consumes = "multipart/form-data")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ToyResponse.ToyImageResponse uploadImage(@PathVariable String toyId,
+                                                      @RequestParam("file") MultipartFile file,
+                                                      @RequestParam(defaultValue = "false") boolean primary,
+                                                      @RequestParam(defaultValue = "0") int sortOrder) {
+        String url = minioService.uploadToyImage(toyId, file);
+        return toyService.addImage(toyId, url, primary, sortOrder);
     }
 
     @Operation(summary = "Inventory status across all active toys")

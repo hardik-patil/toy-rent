@@ -42,7 +42,7 @@ public class SecurityConfig {
                         // /api/v1/admin/**. Must be matched before the GET permitAll rule above would not
                         // catch these (different HTTP methods) and before the generic authenticated() below
                         // would under-restrict them to "any logged-in user".
-                        .requestMatchers(HttpMethod.POST, "/api/v1/toys", "/api/v1/toys/*/images").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/toys", "/api/v1/toys/*/images/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/v1/toys/*").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/toys/*").hasRole("ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")

@@ -43,7 +43,7 @@ spec:
     spec:
       containers:
         - name: booking-service
-          image: toyrental/booking-service:1.0.3
+          image: toyrental/booking-service:1.0.4
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8082
@@ -107,13 +107,13 @@ spec:
             httpGet:
               path: /actuator/health/liveness
               port: 8082
-            initialDelaySeconds: 60
+            initialDelaySeconds: 150
             periodSeconds: 15
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
               port: 8082
-            initialDelaySeconds: 30
+            initialDelaySeconds: 120
             periodSeconds: 10
 
 ---
