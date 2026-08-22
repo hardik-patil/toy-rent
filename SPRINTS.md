@@ -27,7 +27,7 @@ For the detailed step-by-step build record behind the checked items, see
 | S6 — Observability | ✅ Complete | 7/7 |
 | S7 — Performance Eng | ⏭️ Skipped (user doing manually) | 0/8 |
 | S8 — Kubernetes | ✅ Complete | 7/7 |
-| S9 — React Frontend | ⬜ Not started | 0/6 |
+| S9 — React Frontend | 🔶 In progress | 3/6 |
 
 ---
 
@@ -528,11 +528,27 @@ still in place and still correct to keep — it's what makes a future
 Couchbase outage degrade instead of crash — but the platform is no
 longer relying on it to function day-to-day.
 
-## S9 — React Frontend — 0/6
+## S9 — React Frontend — 3/6 (2026-08-22, in progress)
 
-- [ ] Frontend scaffold (routing, API client, auth/token handling)
-- [ ] Toy catalogue browse/search/detail pages
-- [ ] Booking flow (availability calendar, date selection, checkout)
-- [ ] Customer account (profile, my bookings, receipts)
-- [ ] Admin dashboard (inventory, deliveries/pickups/overdue, reports)
-- [ ] Build/deployment integration
+- [x] Frontend scaffold — Vite + React + TypeScript + Tailwind v4, React
+      Router, Zustand auth store, Axios API client with auth interceptor.
+      `frontend/` talks directly to toy-service/booking-service (api-gateway
+      stays out of scope per its existing Keycloak gap); both services'
+      `SecurityConfig` got a dev-only CORS bean for this.
+- [x] Toy catalogue browse/search/detail pages — colorful/playful catalogue
+      grid with search + category/age-group filters (dropdowns populated from
+      `GET /api/v1/toys/metadata`), toy detail page with image gallery.
+- [x] Booking flow — live availability check, weekly/monthly rental-type radio
+      toggle, date range selection, checkout, and a dev-only "simulate
+      payment" button against the WireMock-stubbed webhook. No visual
+      calendar widget (uses the availability endpoint's from/to check, not
+      `/availability/calendar`).
+- [ ] Customer account — "my bookings" list + cancel is done; profile editing
+      and PDF receipt download are not built yet.
+- [ ] Admin dashboard — inventory list + add/edit toy form (category/age-group
+      dropdowns and condition/status radio groups, all fetched from
+      `/metadata`) + real photo upload to MinIO are done. Deliveries/pickups/
+      overdue views and the monthly reports UI are not built yet.
+- [ ] Build/deployment integration — runs via `npm run dev` against
+      port-forwarded services only; no Dockerfile/K8s manifest for the
+      frontend itself yet.
