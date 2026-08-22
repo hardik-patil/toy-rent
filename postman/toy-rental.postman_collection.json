@@ -1,0 +1,1881 @@
+{
+  "info": {
+    "_postman_id": "af4e054c-87ca-43b0-9bf8-292c683822e6",
+    "name": "ToyRental Platform API",
+    "description": "Every user- and admin-facing scenario across toy-service (:8081) and booking-service (:8082).\n\n**Base URLs used directly, not through api-gateway.** api-gateway's own JWT validation has the same unresolved Keycloak-realm gap described in the Admin folders below, so it can't currently route any authenticated request end to end \u2014 hitting the two services directly on their own ports is the only path that actually works in this build.\n\n**Auth:** run `Auth > Login` first \u2014 its test script saves the returned token into `{{customerToken}}`, which every other customer request in this collection reads automatically via Bearer auth. The seeded test account is phone `9821012345` / password `password` (Priya Deshmukh).\n\n**Admin folders are documented templates, not currently runnable** \u2014 see the warning at the top of each one. There is no working path to obtain a ROLE_ADMIN token in the current codebase.\n\n**Error shape** (both services, identical): `{timestamp, status, error, message, correlationId, path}`. Send an `X-Correlation-ID` header to trace a request through logs; omit it and you'll see `correlationId: \"unknown\"` in error responses.\n\n**Suggested run order for a full happy-path smoke test:** Auth > Login \u2192 Toys > Check Availability \u2192 Bookings > Create Booking \u2192 Payments > Simulate Razorpay Webhook \u2192 Bookings > Get Booking Detail (confirm status is CONFIRMED).\n\n**If you're editing this collection:** `customerToken`, `adminToken`, `bookingId`, `razorpayOrderId`, `paymentId`, `reportId` are set at runtime by test scripts via `pm.collectionVariables.set()` and intentionally live only as collection variables, not in the environment file \u2014 an environment variable with the same key would always win over what the scripts write (environment outranks collection in Postman's resolution order), silently breaking every authenticated/chained request.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "description": "Registration and login. Login is the only working auth flow in this build \u2014 it always issues a token with roles=[\"CUSTOMER\"]. Run 'Login' once per session; its test script saves the token into {{customerToken}} automatically for every other customer request in this collection.",
+      "item": [
+        {
+          "name": "Register Customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/customers/register",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "register"
+              ]
+            },
+            "description": "USER SCENARIO: a new visitor signs up for an account before browsing/booking. Creates a row in booking-service's own customers table (bookingdb) \u2014 no email verification, no admin approval step. Change the phone number before re-running or you'll hit the unique-phone constraint (409-style validation error). The seeded test customer (phone 9821012345) already exists \u2014 use 'Login' directly for that one instead of re-registering it.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Asha Kulkarni\",\n  \"phone\": \"9876500001\",\n  \"email\": \"asha.kulkarni@example.com\",\n  \"password\": \"SecurePass123\",\n  \"area\": \"Vashi\",\n  \"flat\": \"C-12\",\n  \"building\": \"Sunrise Apartments\",\n  \"city\": \"Navi Mumbai\",\n  \"pincode\": \"400703\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/customers/login",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "login"
+              ]
+            },
+            "description": "USER SCENARIO: an existing customer logs in to get a JWT for every subsequent authenticated request. Defaults to the seeded test customer (Priya Deshmukh, cust-0001, phone 9821012345 / password 'password'). The token is signed with an RSA key booking-service generates fresh in memory on each restart \u2014 if requests suddenly start 401ing, the service probably restarted since you last logged in; just re-run this.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{customerPhone}}\",\n  \"password\": \"{{customerPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    pm.collectionVariables.set('customerToken', json.accessToken);",
+                  "    pm.collectionVariables.set('customerId', json.customer.id);",
+                  "    console.log('Saved customerToken for ' + json.customer.name);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Customer \u2014 Profile & Account",
+      "description": "Everything a logged-in customer can do to their own account. All requests here need {{customerToken}} \u2014 run Auth > Login first.",
+      "item": [
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/customers/me",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "me"
+              ]
+            },
+            "description": "USER SCENARIO: the app's 'My Account' screen loads the logged-in customer's own profile (name, phone, email, address). Identity comes from the JWT's subject claim, not a path parameter \u2014 there's no way to fetch someone else's profile this way.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update My Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/customers/me",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "me"
+              ]
+            },
+            "description": "USER SCENARIO: customer edits their display name or email from the account settings screen. Phone number is not editable here (it's the login identifier).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Priya Deshmukh-Rao\",\n  \"email\": \"priya.new@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update My Delivery Address",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/customers/me/address",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "me",
+                "address"
+              ]
+            },
+            "description": "USER SCENARIO: customer moves house, or wants a different default delivery address before their next booking. This updates the profile-level address; individual bookings also capture their own delivery address at creation time, so this does not retroactively change any existing booking.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flat\": \"B-204\",\n  \"building\": \"Neelkanth Heights\",\n  \"area\": \"Kharghar\",\n  \"city\": \"Navi Mumbai\",\n  \"pincode\": \"410210\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Bookings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/customers/me/bookings?page=0&size=10",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "me",
+                "bookings"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": "0-indexed page number"
+                },
+                {
+                  "key": "size",
+                  "value": "10",
+                  "description": "page size"
+                }
+              ]
+            },
+            "description": "USER SCENARIO: 'My Bookings' / order history screen \u2014 every booking this customer has ever made (any status: PENDING, CONFIRMED, ACTIVE, RETURNED, CANCELLED, OVERDUE), paginated, newest handling depends on the service's default sort.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Toys \u2014 Browse & Search (Public)",
+      "description": "Catalogue browsing on toy-service. None of this requires a token \u2014 toy-service has no 'logged-in customer' tier of its own, only public reads and ROLE_ADMIN writes (see the Admin folders). Seeded catalogue runs toy-001 through toy-008; {{toyId}} defaults to toy-002 (Fisher-Price Laugh & Learn chair, INFANT_TOYS, 0-2).",
+      "item": [
+        {
+          "name": "Browse Catalogue",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/toys?category=BUILDING_BLOCKS&ageGroup=9-12&page=0&size=10",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "toys"
+              ],
+              "query": [
+                {
+                  "key": "category",
+                  "value": "BUILDING_BLOCKS",
+                  "description": "optional \u2014 filter by category"
+                },
+                {
+                  "key": "ageGroup",
+                  "value": "9-12",
+                  "description": "optional \u2014 filter by age group"
+                },
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": ""
+                },
+                {
+                  "key": "size",
+                  "value": "10",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "USER SCENARIO: the homepage/catalogue grid. Optionally filter by category and/or age group; drop both query params to see everything active."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Toy Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/toys/{{toyId}}",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "toys",
+                "{{toyId}}"
+              ]
+            },
+            "description": "USER SCENARIO: customer taps a toy from the catalogue to see its full detail page (description, pricing, deposit, images, condition)."
+          },
+          "response": []
+        },
+        {
+          "name": "Search Toys",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/toys/search?q=LEGO&category=&age=&page=0&size=10",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "toys",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "LEGO",
+                  "description": "required \u2014 free-text match on name/brand"
+                },
+                {
+                  "key": "category",
+                  "value": "",
+                  "description": "optional"
+                },
+                {
+                  "key": "age",
+                  "value": "",
+                  "description": "optional"
+                },
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": ""
+                },
+                {
+                  "key": "size",
+                  "value": "10",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "USER SCENARIO: customer types into the search box. `q` is required and matches against name/brand; category and age are optional extra filters on top of the text match."
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/toys/categories",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "toys",
+                "categories"
+              ]
+            },
+            "description": "USER SCENARIO: populate a category filter dropdown/chips row with every distinct category actually present in the active catalogue."
+          },
+          "response": []
+        },
+        {
+          "name": "Check Availability For Date Range",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/toys/{{toyId}}/availability?from=2026-12-01&to=2026-12-08",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "toys",
+                "{{toyId}}",
+                "availability"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-12-01",
+                  "description": "ISO date"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-08",
+                  "description": "ISO date"
+                }
+              ]
+            },
+            "description": "USER SCENARIO: customer has picked a toy and a date range on the booking screen \u2014 this is the live check that shows 'Available' / 'Not available for these dates' before they commit. Backed by Couchbase; if the toy has never been booked it comes back available with no blocked dates."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Availability Calendar",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/toys/{{toyId}}/availability/calendar",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "toys",
+                "{{toyId}}",
+                "availability",
+                "calendar"
+              ]
+            },
+            "description": "USER SCENARIO: a month-view calendar widget on the toy detail page, showing every currently blocked date range for this toy (not limited to one query window like the availability check above)."
+          },
+          "response": []
+        },
+        {
+          "name": "Browse Available Toys For Date Range",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/toys/available?from=2026-12-01&to=2026-12-08&page=0&size=10",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "toys",
+                "available"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-12-01",
+                  "description": "ISO date"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-08",
+                  "description": "ISO date"
+                },
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": ""
+                },
+                {
+                  "key": "size",
+                  "value": "10",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "USER SCENARIO: 'What can I rent for next weekend?' \u2014 browse the whole catalogue pre-filtered to only toys actually free for the given date range, instead of checking availability one toy at a time."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Bookings",
+      "description": "Create and manage a rental booking. Needs {{customerToken}} \u2014 run Auth > Login first. Creating a booking pessimistically locks the date range against double-booking and kicks off a WireMock-backed Razorpay order \u2014 see the Payments folder to actually confirm it.",
+      "item": [
+        {
+          "name": "Create Booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/bookings",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "description": "USER SCENARIO: customer taps 'Book Now' after confirming a toy is available for their chosen dates. Creates the booking in status PENDING/paymentStatus PENDING and opens a Razorpay order via the WireMock stub (always returns order id 'order_mock123' in dev). This request's test script auto-saves the new bookingId and razorpayOrderId into collection variables so the Payments folder can chain off it without copy-pasting.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toyId\": \"{{toyId}}\",\n  \"startDate\": \"2026-12-01\",\n  \"endDate\": \"2026-12-08\",\n  \"rentalType\": \"WEEKLY\",\n  \"deliveryFlat\": \"B-204\",\n  \"deliveryBuilding\": \"Neelkanth Heights\",\n  \"deliveryArea\": \"Kharghar\",\n  \"deliveryCity\": \"Navi Mumbai\",\n  \"deliveryPincode\": \"410210\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const json = pm.response.json();",
+                  "    pm.collectionVariables.set('bookingId', json.id);",
+                  "    if (json.razorpayOrderId) {",
+                  "        pm.collectionVariables.set('razorpayOrderId', json.razorpayOrderId);",
+                  "    }",
+                  "    console.log('Saved bookingId=' + json.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Booking Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/bookings/{{bookingId}}",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{bookingId}}"
+              ]
+            },
+            "description": "USER SCENARIO: booking confirmation / order detail screen. Owner-only \u2014 the logged-in customer must be the one who made this booking, or it 404s/403s rather than leaking another customer's booking.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Download Receipt PDF",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/bookings/{{bookingId}}/receipt",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{bookingId}}",
+                "receipt"
+              ]
+            },
+            "description": "USER SCENARIO: customer downloads a PDF receipt for a booking (e.g. for expense records). Returns binary application/pdf \u2014 in Postman, use 'Send and Download' or check the Body > preview as the response won't render as JSON.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Booking",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/bookings/{{bookingId}}/cancel",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{bookingId}}",
+                "cancel"
+              ]
+            },
+            "description": "USER SCENARIO: customer changes their mind before (or during) the rental and cancels. The reason field is entirely optional \u2014 the whole request body can be omitted. Cancelling releases the toy's blocked dates in Couchbase via the booking.cancelled Kafka event.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Change of plans\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Extend Booking",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/bookings/{{bookingId}}/extend",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{bookingId}}",
+                "extend"
+              ]
+            },
+            "description": "USER SCENARIO: customer wants to keep the toy longer than originally booked. Only works if the new end date doesn't collide with someone else's booking for the same toy.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newEndDate\": \"2026-12-15\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "description": "The payment side of a booking. 'Simulate Razorpay Webhook' is the request that actually moves a booking from PENDING to CONFIRMED in this dev setup \u2014 Razorpay itself is never called, WireMock stands in for it, so this webhook has to be fired manually to complete the flow (in production Razorpay calls it automatically after the customer pays in the app).",
+      "item": [
+        {
+          "name": "Initiate / Retry Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/payments/initiate",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "initiate"
+              ]
+            },
+            "description": "USER SCENARIO: customer's payment attempt failed or timed out and they hit 'Try Again' \u2014 re-fetches (or re-opens) the pending payment for a booking rather than creating a duplicate. Not needed on the happy path since 'Create Booking' already opens the initial payment.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": \"{{bookingId}}\",\n  \"method\": \"UPI\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Simulate Razorpay Webhook (Payment Success)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/payments/webhook",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "webhook"
+              ]
+            },
+            "description": "SYSTEM SCENARIO (not user-triggered): this is the callback Razorpay's servers would normally POST directly, with no auth header \u2014 it's public by design since Razorpay isn't a logged-in customer. In this dev/WireMock setup nobody calls it automatically, so fire it manually here right after 'Create Booking' to confirm the payment and flip the booking to CONFIRMED. Uses the {{razorpayOrderId}} saved by Create Booking (WireMock always returns 'order_mock123'); payment_id/signature are fixed mock values, not validated against a real Razorpay signature in dev.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"razorpay_order_id\": \"{{razorpayOrderId}}\",\n  \"razorpay_payment_id\": \"pay_mock456\",\n  \"razorpay_signature\": \"mock_signature_abc\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Payment Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/payments/{{paymentId}}",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{paymentId}}"
+              ]
+            },
+            "description": "USER SCENARIO: check the status of a specific payment record by its own id (not the booking id) \u2014 e.g. polling after initiating a payment. Set {{paymentId}} manually; it isn't auto-captured elsewhere in this collection since the booking/webhook responses key off bookingId, not paymentId.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin \u2014 Toys \u26a0\ufe0f requires ROLE_ADMIN (not runnable)",
+      "description": "\u26a0\ufe0f NOT CURRENTLY RUNNABLE in this build. There is no working path to obtain a ROLE_ADMIN token: booking-service's login endpoint hardcodes roles=[\"CUSTOMER\"] on every token it issues (no admin login, no seeded admin user), and toy-service has no JWT decoder of its own \u2014 it falls back to validating against a Keycloak realm (KEYCLOAK_ISSUER_URI) that was never imported, so it can't validate any admin token even if one existed. These requests are documented templates for the intended admin flow, using {{adminToken}} as a placeholder \u2014 they'll all 401/500 until a real admin-auth path is wired up (e.g. a booking-service admin login endpoint that issues roles=[\"ADMIN\"], and a matching JwtDecoder in toy-service that trusts the same signing key/claim shape).",
+      "item": [
+        {
+          "name": "Add Toy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/toys",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "toys"
+              ]
+            },
+            "description": "ADMIN SCENARIO: staff adds a brand-new toy to the catalogue.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Melissa & Doug Wooden Kitchen\",\n  \"description\": \"Play kitchen set with accessories\",\n  \"brand\": \"Melissa & Doug\",\n  \"category\": \"PRETEND_PLAY\",\n  \"ageGroup\": \"3-6\",\n  \"condition\": \"NEW\",\n  \"status\": \"AVAILABLE\",\n  \"mrp\": 12999.0,\n  \"weeklyPrice\": 599.0,\n  \"monthlyPrice\": 1999.0,\n  \"depositAmount\": 2500.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Toy",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/toys/{{toyId}}",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "toys",
+                "{{toyId}}"
+              ]
+            },
+            "description": "ADMIN SCENARIO: staff corrects/updates a toy's listed details (e.g. a price change). This is a full replace, not a partial patch \u2014 send every field.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Fisher-Price Laugh & Learn Smart Stages Chair\",\n  \"description\": \"Interactive learning chair with lights, music and phrases\",\n  \"brand\": \"Fisher-Price\",\n  \"category\": \"INFANT_TOYS\",\n  \"ageGroup\": \"0-2\",\n  \"condition\": \"GOOD\",\n  \"status\": \"AVAILABLE\",\n  \"mrp\": 3499.0,\n  \"weeklyPrice\": 219.0,\n  \"monthlyPrice\": 699.0,\n  \"depositAmount\": 800.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Soft Delete Toy",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/toys/{{toyId}}",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "toys",
+                "{{toyId}}"
+              ]
+            },
+            "description": "ADMIN SCENARIO: staff retires a toy from the catalogue (damaged beyond repair, discontinued, etc.). Soft delete \u2014 flips is_active rather than removing the row, so historical bookings referencing it stay intact.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add Toy Image",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/toys/{{toyId}}/images",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "toys",
+                "{{toyId}}",
+                "images"
+              ]
+            },
+            "description": "ADMIN SCENARIO: staff uploads a product photo URL for a toy (this endpoint takes an already-hosted image URL, not a raw file upload \u2014 pair with an external asset host or MinIO for the actual file).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://cdn.example.com/toys/toy-002-front.jpg\",\n  \"primary\": true,\n  \"sortOrder\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Inventory Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/admin/toys/inventory?page=0&size=10",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "toys",
+                "inventory"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": "0-indexed page number"
+                },
+                {
+                  "key": "size",
+                  "value": "10",
+                  "description": "page size"
+                }
+              ]
+            },
+            "description": "ADMIN SCENARIO: ops dashboard \u2014 every active toy with its current status, for a full stock overview.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Low Stock (Unavailable Toys)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/admin/toys/low-stock?page=0&size=10",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "toys",
+                "low-stock"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": "0-indexed page number"
+                },
+                {
+                  "key": "size",
+                  "value": "10",
+                  "description": "page size"
+                }
+              ]
+            },
+            "description": "ADMIN SCENARIO: 'what's currently out of circulation' view \u2014 toys that are RENTED, DAMAGED, CLEANING, or RETIRED rather than sitting available.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Toy Condition",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_toy}}/api/v1/admin/toys/{{toyId}}/condition",
+              "host": [
+                "{{baseUrl_toy}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "toys",
+                "{{toyId}}",
+                "condition"
+              ]
+            },
+            "description": "ADMIN SCENARIO: staff logs a condition change after an inspection \u2014 e.g. downgrading a toy from GOOD to FAIR after visible wear, or flagging POOR after damage is found on return.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"condition\": \"FAIR\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin \u2014 Bookings \u26a0\ufe0f requires ROLE_ADMIN (not runnable)",
+      "description": "\u26a0\ufe0f NOT CURRENTLY RUNNABLE in this build. There is no working path to obtain a ROLE_ADMIN token: booking-service's login endpoint hardcodes roles=[\"CUSTOMER\"] on every token it issues (no admin login, no seeded admin user), and toy-service has no JWT decoder of its own \u2014 it falls back to validating against a Keycloak realm (KEYCLOAK_ISSUER_URI) that was never imported, so it can't validate any admin token even if one existed. These requests are documented templates for the intended admin flow, using {{adminToken}} as a placeholder \u2014 they'll all 401/500 until a real admin-auth path is wired up (e.g. a booking-service admin login endpoint that issues roles=[\"ADMIN\"], and a matching JwtDecoder in toy-service that trusts the same signing key/claim shape).",
+      "item": [
+        {
+          "name": "All Bookings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/admin/bookings?status=CONFIRMED&page=0&size=10",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "bookings"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "CONFIRMED",
+                  "description": "optional \u2014 PENDING|CONFIRMED|ACTIVE|RETURNED|CANCELLED|OVERDUE"
+                },
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": ""
+                },
+                {
+                  "key": "size",
+                  "value": "10",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "ADMIN SCENARIO: the full bookings ops table, optionally filtered to one status. Drop the status param to see every booking regardless of state.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Today's Deliveries",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/admin/bookings/today/deliveries?page=0&size=10",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "bookings",
+                "today",
+                "deliveries"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": "0-indexed page number"
+                },
+                {
+                  "key": "size",
+                  "value": "10",
+                  "description": "page size"
+                }
+              ]
+            },
+            "description": "ADMIN SCENARIO: the delivery team's daily run sheet \u2014 every booking whose rental starts today and needs the toy dropped off.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Today's Pickups",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/admin/bookings/today/pickups?page=0&size=10",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "bookings",
+                "today",
+                "pickups"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": "0-indexed page number"
+                },
+                {
+                  "key": "size",
+                  "value": "10",
+                  "description": "page size"
+                }
+              ]
+            },
+            "description": "ADMIN SCENARIO: the same run sheet for the other direction \u2014 bookings ending today that need the toy collected back.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Overdue Returns",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/admin/bookings/overdue?page=0&size=10",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "bookings",
+                "overdue"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": "0-indexed page number"
+                },
+                {
+                  "key": "size",
+                  "value": "10",
+                  "description": "page size"
+                }
+              ]
+            },
+            "description": "ADMIN SCENARIO: bookings past their end date that still haven't been returned \u2014 the list ops would chase up on. Populated by the scheduled OverdueDetectionService job, keyed off the logical/business date rather than the wall clock.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Booking Returned",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/admin/bookings/{{bookingId}}/return",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "bookings",
+                "{{bookingId}}",
+                "return"
+              ]
+            },
+            "description": "ADMIN SCENARIO: the toy physically comes back \u2014 staff logs its condition on return and any damage notes, closing out the booking (RETURNED status), which frees the toy's blocked dates.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"condition\": \"GOOD\",\n  \"damageNotes\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Manually Confirm Booking",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/admin/bookings/{{bookingId}}/confirm",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "bookings",
+                "{{bookingId}}",
+                "confirm"
+              ]
+            },
+            "description": "ADMIN SCENARIO: a booking was paid outside the normal Razorpay/webhook flow (e.g. cash or COD collected in person) \u2014 staff manually flips it to CONFIRMED instead of waiting on a payment webhook that will never arrive.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin \u2014 Payments \u26a0\ufe0f requires ROLE_ADMIN (not runnable)",
+      "description": "\u26a0\ufe0f NOT CURRENTLY RUNNABLE in this build. There is no working path to obtain a ROLE_ADMIN token: booking-service's login endpoint hardcodes roles=[\"CUSTOMER\"] on every token it issues (no admin login, no seeded admin user), and toy-service has no JWT decoder of its own \u2014 it falls back to validating against a Keycloak realm (KEYCLOAK_ISSUER_URI) that was never imported, so it can't validate any admin token even if one existed. These requests are documented templates for the intended admin flow, using {{adminToken}} as a placeholder \u2014 they'll all 401/500 until a real admin-auth path is wired up (e.g. a booking-service admin login endpoint that issues roles=[\"ADMIN\"], and a matching JwtDecoder in toy-service that trusts the same signing key/claim shape).",
+      "item": [
+        {
+          "name": "Refund Booking Deposit",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/payments/{{bookingId}}/refund",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{bookingId}}",
+                "refund"
+              ]
+            },
+            "description": "ADMIN SCENARIO: after a toy is returned in good condition, staff refunds the customer's security deposit. Fails if there's no successful deposit payment on record for this booking to refund.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin \u2014 Reports \u26a0\ufe0f requires ROLE_ADMIN (not runnable)",
+      "description": "\u26a0\ufe0f NOT CURRENTLY RUNNABLE in this build. There is no working path to obtain a ROLE_ADMIN token: booking-service's login endpoint hardcodes roles=[\"CUSTOMER\"] on every token it issues (no admin login, no seeded admin user), and toy-service has no JWT decoder of its own \u2014 it falls back to validating against a Keycloak realm (KEYCLOAK_ISSUER_URI) that was never imported, so it can't validate any admin token even if one existed. These requests are documented templates for the intended admin flow, using {{adminToken}} as a placeholder \u2014 they'll all 401/500 until a real admin-auth path is wired up (e.g. a booking-service admin login endpoint that issues roles=[\"ADMIN\"], and a matching JwtDecoder in toy-service that trusts the same signing key/claim shape).",
+      "item": [
+        {
+          "name": "Trigger Month-End Report",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/admin/reports/trigger",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "reports",
+                "trigger"
+              ]
+            },
+            "description": "ADMIN SCENARIO: staff (or a scheduled job) kicks off month-end report generation for a specific month/year. Publishes a Kafka event; the report PDF and summary get generated asynchronously \u2014 poll 'List Reports' / 'Report Metadata' afterward rather than expecting it synchronously.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"month\": 8,\n  \"year\": 2026\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Reports",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/admin/reports?page=0&size=10",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "reports"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": "0-indexed page number"
+                },
+                {
+                  "key": "size",
+                  "value": "10",
+                  "description": "page size"
+                }
+              ]
+            },
+            "description": "ADMIN SCENARIO: browse every month-end report ever generated.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Report Metadata",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/admin/reports/{{reportId}}",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "reports",
+                "{{reportId}}"
+              ]
+            },
+            "description": "ADMIN SCENARIO: check a specific report's status/summary numbers (total bookings, revenue, deposits, pending returns, top toy) without downloading the full PDF. Set {{reportId}} from a 'List Reports' response.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Download Report PDF",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/admin/reports/{{reportId}}/pdf",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "reports",
+                "{{reportId}}",
+                "pdf"
+              ]
+            },
+            "description": "ADMIN SCENARIO: download the generated month-end report as a PDF. Only works once the report's status is SUCCESS \u2014 errors if generation is still in progress or failed.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health & Observability",
+      "description": "Actuator endpoints for both services \u2014 no auth required. Useful for a quick 'is everything up' check before running the scenario folders above.",
+      "item": [
+        {
+          "name": "toy-service (:8081)",
+          "description": "",
+          "item": [
+            {
+              "name": "toy-service \u2014 Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl_toy}}/actuator/health",
+                  "host": [
+                    "{{baseUrl_toy}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ]
+                },
+                "description": "Overall health of toy-service, aggregating DB/Kafka/Couchbase (and Redis for the gateway) checks into one status. Good first call when something's misbehaving \u2014 narrows down whether the service is even up before digging into individual endpoints."
+              },
+              "response": []
+            },
+            {
+              "name": "toy-service \u2014 Liveness",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl_toy}}/actuator/health/liveness",
+                  "host": [
+                    "{{baseUrl_toy}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health",
+                    "liveness"
+                  ]
+                },
+                "description": "Kubernetes liveness probe target \u2014 'is the process alive enough to keep running, or should it be restarted'. Doesn't check downstream dependencies."
+              },
+              "response": []
+            },
+            {
+              "name": "toy-service \u2014 Readiness",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl_toy}}/actuator/health/readiness",
+                  "host": [
+                    "{{baseUrl_toy}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health",
+                    "readiness"
+                  ]
+                },
+                "description": "Kubernetes readiness probe target \u2014 'is this instance ready to receive traffic right now'. Can flip to DOWN temporarily during startup or a downstream outage without the process itself being unhealthy."
+              },
+              "response": []
+            },
+            {
+              "name": "toy-service \u2014 Prometheus Metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl_toy}}/actuator/prometheus",
+                  "host": [
+                    "{{baseUrl_toy}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "prometheus"
+                  ]
+                },
+                "description": "Raw Prometheus scrape output \u2014 every custom + built-in metric this service exposes. Useful to sanity-check a specific counter/timer exists and is incrementing without opening Grafana."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "booking-service (:8082)",
+          "description": "",
+          "item": [
+            {
+              "name": "booking-service \u2014 Health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl_booking}}/actuator/health",
+                  "host": [
+                    "{{baseUrl_booking}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health"
+                  ]
+                },
+                "description": "Overall health of booking-service, aggregating DB/Kafka/Couchbase (and Redis for the gateway) checks into one status. Good first call when something's misbehaving \u2014 narrows down whether the service is even up before digging into individual endpoints."
+              },
+              "response": []
+            },
+            {
+              "name": "booking-service \u2014 Liveness",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl_booking}}/actuator/health/liveness",
+                  "host": [
+                    "{{baseUrl_booking}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health",
+                    "liveness"
+                  ]
+                },
+                "description": "Kubernetes liveness probe target \u2014 'is the process alive enough to keep running, or should it be restarted'. Doesn't check downstream dependencies."
+              },
+              "response": []
+            },
+            {
+              "name": "booking-service \u2014 Readiness",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl_booking}}/actuator/health/readiness",
+                  "host": [
+                    "{{baseUrl_booking}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "health",
+                    "readiness"
+                  ]
+                },
+                "description": "Kubernetes readiness probe target \u2014 'is this instance ready to receive traffic right now'. Can flip to DOWN temporarily during startup or a downstream outage without the process itself being unhealthy."
+              },
+              "response": []
+            },
+            {
+              "name": "booking-service \u2014 Prometheus Metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl_booking}}/actuator/prometheus",
+                  "host": [
+                    "{{baseUrl_booking}}"
+                  ],
+                  "path": [
+                    "actuator",
+                    "prometheus"
+                  ]
+                },
+                "description": "Raw Prometheus scrape output \u2014 every custom + built-in metric this service exposes. Useful to sanity-check a specific counter/timer exists and is incrementing without opening Grafana."
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl_toy",
+      "value": "http://localhost:8081",
+      "type": "string"
+    },
+    {
+      "key": "baseUrl_booking",
+      "value": "http://localhost:8082",
+      "type": "string"
+    },
+    {
+      "key": "baseUrl_gateway",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "customerPhone",
+      "value": "9821012345",
+      "type": "string"
+    },
+    {
+      "key": "customerPassword",
+      "value": "password",
+      "type": "string"
+    },
+    {
+      "key": "customerToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerId",
+      "value": "cust-0001",
+      "type": "string"
+    },
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "toyId",
+      "value": "toy-002",
+      "type": "string"
+    },
+    {
+      "key": "bookingId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "razorpayOrderId",
+      "value": "order_mock123",
+      "type": "string"
+    },
+    {
+      "key": "paymentId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "reportId",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}
