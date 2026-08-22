@@ -24,7 +24,7 @@ For the detailed step-by-step build record behind the checked items, see
 | S3 — Booking Service | ✅ Complete | 10/10 |
 | S4 — Kafka Pipeline | ✅ Complete | 10/10 |
 | S5 — Month-End Report | ✅ Complete | 8/8 |
-| S6 — Observability | ⬜ Not started | 0/7 |
+| S6 — Observability | ✅ Complete | 7/7 |
 | S7 — Performance Eng | ⬜ Not started | 0/8 |
 | S8 — Kubernetes | ⬜ Not started | 0/7 |
 | S9 — React Frontend | ⬜ Not started | 0/6 |
@@ -220,16 +220,97 @@ document matching CLAUDE.md's example shape field-for-field, and both
 idempotency paths (same eventId; different eventId, same month/year)
 independently confirmed with no duplicate rows.
 
-## S6 — Observability — 0/7
+## S6 — Observability ✅ 7/7 (2026-08-22)
 
-- [ ] Wire the custom Prometheus metrics into code (cache hit/miss, booking
-      counters, payment counters, PDF generation timer, report counter)
-- [ ] Grafana dashboard JSON (provisioned into `grafana/dashboards`)
-- [ ] Verify correlationId end-to-end across HTTP + Kafka + logs
-- [ ] Structured logging review across all three services
-- [ ] Tune liveness/readiness probe timings against real startup behavior
-- [ ] Tracing setup (Zipkin, per the `monitoring` k8s namespace)
-- [ ] Prometheus alerting rules
+- [x] Wire the custom Prometheus metrics into code (cache hit/miss, booking
+      counters, payment counters, PDF generation timer, report counter) —
+      also fixed a real Sprint 3 gap found while doing this: `payment.success.
+      total`/`payment.failed.total` in `PaymentService` were built as plain
+      untagged `Counter`s despite CLAUDE.md requiring `.tag("method", ...)`/
+      `.tag("reason", ...)`. Switched from constructor-built fixed counters to
+      inline `Counter.builder(...).tag(...).register(meterRegistry)` at each
+      call site (Micrometer's `register()` is idempotent by name+tags, so this
+      is safe for dynamic tag values). Confirmed live post-fix:
+      `payment_success_total{method="UPI"}` and
+      `payment_failed_total{reason="NO_PENDING_PAYMENT_FOUND"}` both showing
+      real labels via `/actuator/prometheus`, not just asserted in a test.
+- [x] Grafana dashboard JSON (provisioned into `grafana/dashboards`) — also
+      found the dashboards folder + provisioning config didn't exist on disk
+      at all (dashboard JSON alone in a mounted volume never appears in
+      Grafana's UI without a provisioning config for both the dashboard
+      provider and a datasource). Added `grafana/provisioning/{datasources,
+      dashboards}` and mounted it in `docker-compose.yml`. Verified live:
+      `/api/datasources` shows Prometheus auto-provisioned, `/api/search`
+      shows "ToyRental Platform — Overview" (uid `toyrental-overview`)
+      auto-loaded, 11 panels covering services-up, HTTP rates/5xx, cache hit
+      ratio, booking/payment/report counters, PDF duration, JVM heap, Kafka
+      lag.
+- [x] Verify correlationId end-to-end across HTTP + Kafka + logs — also found
+      and fixed a real gap: `OverdueDetectionService`'s `@Scheduled` job had
+      no MDC correlationId set (no incoming HTTP request to derive one from),
+      so every log line and every `booking.overdue` event it published showed
+      `correlationId= ` (confirmed empty in Sprint 4's actual log output).
+      Fixed by generating `"corr-overdue-" + UUID.randomUUID()` and setting it
+      via `MDC.put(...)` in try/finally around the scheduled method. Verified
+      live end-to-end with a real booking+webhook flow using a custom
+      `X-Correlation-ID` header: the same ID appeared in booking-service's
+      `BookingEventProducer` publish log, the Kafka message header, and
+      toy-service's `BookingEventConsumer` consume log for the same eventId.
+- [x] Structured logging review across all three services — grepped for
+      `log.info/warn/error/debug` usage without `@Slf4j` (none found) and
+      checked every `@Scheduled`/`@KafkaListener` class for MDC usage — the
+      `OverdueDetectionService` gap above was the only one; all 4
+      `@KafkaListener` classes already set MDC correctly.
+- [x] Tune liveness/readiness probe timings against real startup behavior —
+      both services' actual local startup (`Started ToyServiceApplication in
+      5.036 seconds`, `Started BookingServiceApplication in 6.732 seconds`)
+      sits well inside CLAUDE.md's documented probe delays (readiness
+      initialDelay=30s, liveness initialDelay=60s), and both
+      `/actuator/health/{liveness,readiness}` respond `UP` immediately after
+      startup completes. No manifests exist yet to apply K8s-specific
+      resource-constrained timing to (that's S8); current numbers verified
+      as generously safe for local/dev startup behavior.
+- [x] Tracing setup (Zipkin, per the `monitoring` k8s namespace) — added
+      `micrometer-tracing-bridge-brave` + `zipkin-reporter-brave` to
+      toy-service and booking-service (user-approved via AskUserQuestion;
+      deliberately excluded api-gateway, which has no functional routes wired
+      up in any sprint yet), 100% sampling, and a `zipkin` service in
+      `docker-compose.yml`. Verified live: `/api/v2/services` lists both
+      `toy-service` and `booking-service`, and a real traffic flow produced
+      genuine spans (including Spring Security filter-chain detail) queryable
+      via `/api/v2/traces`.
+- [x] Prometheus alerting rules — `prometheus/alerts.yml`, 6 rules across 5
+      groups (`ServiceDown`, `HighHttp5xxRate`, `PaymentFailureSpike`,
+      `LowAvailabilityCacheHitRatio`, `KafkaConsumerLagHigh`,
+      `JvmHeapNearLimit`), wired via `rule_files` in `prometheus.yml` and
+      mounted in `docker-compose.yml`. Verified live via
+      `/api/v1/rules` — all 6 loaded with `health":"ok"`, no parse errors.
+
+**Infra note (not a code bug):** bringing up the `zipkin`/`grafana` containers
+hit a real Docker Hub pull stall — both `docker compose up` and direct
+`docker pull` for `openzipkin/zipkin:latest` and `grafana/grafana:latest`
+wedged repeatedly (zero progress for 4+ minutes) even though the daemon and
+`docker ps`/`docker images` stayed responsive throughout, and even survived
+one full Docker Desktop restart. Resolved by retrying the pulls individually
+(Docker resumes from whatever layers already completed) until each finished.
+Separately, the containerized Grafana's default host port 3000 collided with
+a pre-existing Homebrew-installed native Grafana on this machine (unrelated
+to this project, running since before this session) — remapped the
+container to host port **3001** in `docker-compose.yml` rather than touching
+that unrelated service. Also worth noting for future `mvn test` runs on this
+machine: a native PostgreSQL 15 install (`/Library/PostgreSQL/15`) also
+listens on the default port 5432, separate from this project's Docker
+Postgres (mapped to host **5433**) — running `mvn test` without
+`SPRING_DATASOURCE_URL`/`POSTGRES_USER`/`POSTGRES_PASSWORD` env vars pointed
+at 5433 will hit the wrong server and fail with a misleading "password
+authentication failed" on Postgres' `contextLoads` tests. Both are pre-
+existing local-machine quirks, not project bugs.
+
+Full suites green with the correct env vars: toy-service 16/16, booking-
+service 48/48 (12 test classes, including the 6 new `PaymentServiceTest`
+cases added this sprint — a real coverage gap since Sprint 3, since
+`PaymentService` had no dedicated test file despite containing the
+multi-booking-per-order-id logic).
 
 ## S7 — Performance Engineering — 0/8
 

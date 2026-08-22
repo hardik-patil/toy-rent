@@ -140,6 +140,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml
       - prometheus_data:/prometheus
     ports:
       - "9091:9090"
@@ -155,11 +156,28 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
       - ./grafana/dashboards:/var/lib/grafana/dashboards
+      # Dropping dashboard JSON into /var/lib/grafana/dashboards alone doesn't get it into
+      # Grafana's UI — it needs a provisioning config telling it to load from that path, and a
+      # datasource config so the dashboard's Prometheus queries resolve to something. Neither
+      # existed before (the dashboards folder itself didn't even exist on disk).
+      - ./grafana/provisioning:/etc/grafana/provisioning
       - grafana_data:/var/lib/grafana
     ports:
-      - "3000:3000"
+      # Host 3000 is already bound by a pre-existing Homebrew Grafana install unrelated
+      # to this project (PID 987, running since before this session) — mapped to 3001
+      # on the host instead of touching that service.
+      - "3001:3000"
     depends_on:
       - prometheus
+    networks:
+      - toyrental-net
+
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: toyrental-zipkin
+    restart: unless-stopped
+    ports:
+      - "9411:9411"
     networks:
       - toyrental-net
 

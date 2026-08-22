@@ -1,10 +1,12 @@
 package com.toyrental.booking.service;
 
+import com.toyrental.booking.config.CorrelationIdFilter;
 import com.toyrental.booking.entity.Booking;
 import com.toyrental.booking.entity.BookingStatus;
 import com.toyrental.booking.kafka.BookingEventProducer;
 import com.toyrental.booking.repository.BookingRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -12,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.UUID;
 
 /**
  * Finds ACTIVE bookings past their end_date, flips them to OVERDUE, and publishes booking.overdue
@@ -37,19 +40,29 @@ public class OverdueDetectionService {
             fixedRateString = "${overdue-check.interval-ms:21600000}")
     @Transactional
     public void detectAndPublishOverdueBookings() {
-        Page<Booking> overdue = bookingRepository.findByStatusAndEndDateBefore(
-                BookingStatus.ACTIVE, LocalDate.now(), Pageable.unpaged());
+        // No incoming HTTP request to read X-Correlation-ID from — this run needs its own, or
+        // every log line and every booking.overdue event it publishes carries an empty
+        // correlationId, breaking the "HTTP header → Kafka header → logs" propagation chain
+        // CLAUDE.md requires. Confirmed live: without this, published events showed
+        // "correlationId= " (blank) in both this service's logs and the consumer's.
+        MDC.put(CorrelationIdFilter.MDC_KEY, "corr-overdue-" + UUID.randomUUID());
+        try {
+            Page<Booking> overdue = bookingRepository.findByStatusAndEndDateBefore(
+                    BookingStatus.ACTIVE, LocalDate.now(), Pageable.unpaged());
 
-        if (overdue.isEmpty()) {
-            log.debug("Overdue check: no ACTIVE bookings past their end date");
-            return;
-        }
+            if (overdue.isEmpty()) {
+                log.debug("Overdue check: no ACTIVE bookings past their end date");
+                return;
+            }
 
-        for (Booking booking : overdue) {
-            booking.setStatus(BookingStatus.OVERDUE);
-            bookingRepository.save(booking);
-            bookingEventProducer.publishBookingOverdue(booking);
-            log.info("Marked booking id={} OVERDUE (endDate={})", booking.getId(), booking.getEndDate());
+            for (Booking booking : overdue) {
+                booking.setStatus(BookingStatus.OVERDUE);
+                bookingRepository.save(booking);
+                bookingEventProducer.publishBookingOverdue(booking);
+                log.info("Marked booking id={} OVERDUE (endDate={})", booking.getId(), booking.getEndDate());
+            }
+        } finally {
+            MDC.remove(CorrelationIdFilter.MDC_KEY);
         }
     }
 

@@ -658,3 +658,135 @@ and `monthly.report.generated`.
   `booking.conflict.total`, `payment.success/failed.total`,
   `pdf.generation.duration`, `monthly.report.generated.total`), but no
   Grafana dashboards or alerting rules exist yet.
+
+## Session 5 — 2026-08-22 — Sprint 6: Observability
+
+**Goal:** Close the 7 S6 stories — correct the metric tags CLAUDE.md
+requires, get a real Grafana dashboard auto-provisioned (not just JSON on
+disk), verify correlationId end-to-end, a structured-logging audit, tracing
+via Zipkin, and Prometheus alerting rules.
+
+### Steps
+
+1. Planning pass surfaced a real Sprint 3 gap before writing any new code:
+   `PaymentService`'s `payment.success.total`/`payment.failed.total`
+   counters were built once in the constructor as fixed, untagged `Counter`
+   instances, despite CLAUDE.md's spec explicitly requiring
+   `.tag("method", ...)` / `.tag("reason", ...)`. Fixed by switching to
+   inline `Counter.builder(...).tag(...).register(meterRegistry)` at each
+   increment call site — Micrometer's `register()` is idempotent by
+   name+tags, so this is safe even though tag values (method, failure
+   reason) are dynamic. Added `PaymentServiceTest` (6 tests) — a real
+   coverage gap since Sprint 3, since `PaymentService` had no dedicated test
+   file at all despite containing the multi-booking-per-order-id bug found
+   and fixed in Session 3. Used a real `SimpleMeterRegistry` (not mocked)
+   specifically to assert actual tagged metric values, not just that
+   `.increment()` was called.
+
+2. Fixed `OverdueDetectionService`: its `@Scheduled` job had no MDC
+   correlationId set (no incoming HTTP request to derive one from), which
+   Session 3's actual log output had already shown producing
+   `correlationId= ` (blank) on both its own logs and the `booking.overdue`
+   event's downstream consumer. Fixed by generating
+   `"corr-overdue-" + UUID.randomUUID()` and wrapping the method body in
+   try/finally around `MDC.put`/`MDC.remove`.
+
+3. Ran a structured-logging audit across all three services: grepped for
+   `log.info/warn/error/debug` usage without `@Slf4j` on the class (none
+   found) and checked every `@Scheduled`/`@KafkaListener` class for MDC
+   usage — the `OverdueDetectionService` gap above was the only one; all 4
+   `@KafkaListener` classes (`BookingEventConsumer` in toy-service,
+   `MonthEndTriggerConsumer`/`PaymentEventConsumer`/
+   `BookingNotificationConsumer` in booking-service) already set MDC
+   correctly.
+
+4. Added Zipkin tracing: asked the user via AskUserQuestion whether to add
+   `micrometer-tracing-bridge-brave` + `zipkin-reporter-brave` (not in
+   CLAUDE.md's original dependency table) — approved. Added to toy-service
+   and booking-service only (api-gateway has no functional routes wired up
+   in any sprint yet, so tracing it now would be premature). 100% sampling,
+   `ZIPKIN_ENDPOINT` env var, and `traceId`/`spanId` added to the console
+   log pattern alongside `correlationId`.
+
+5. Wrote Grafana provisioning from scratch — the `grafana/dashboards`
+   folder didn't exist on disk at all, and `docker-compose.yml` only
+   mounted it with no provisioning config, meaning any dashboard JSON
+   dropped there would never have actually appeared in Grafana's UI (a
+   dashboard file alone needs a provisioning YAML pointing at it, plus a
+   datasource config so its queries resolve to something). Added
+   `grafana/provisioning/{datasources,dashboards}` and an 11-panel
+   dashboard (`toyrental-overview.json`) covering every custom metric
+   CLAUDE.md documents, using real Prometheus metric names matching what
+   Micrometer actually emits (dots → underscores, `_total` suffix on
+   counters).
+
+6. Wrote `prometheus/alerts.yml` — 6 rules (`ServiceDown`,
+   `HighHttp5xxRate`, `PaymentFailureSpike`, `LowAvailabilityCacheHitRatio`,
+   `KafkaConsumerLagHigh`, `JvmHeapNearLimit`), two of which are explicitly
+   annotated as expected to trip under load right now since they're
+   watching CLAUDE.md's intentional Sprint 7 bottlenecks (cold Couchbase
+   cache, single-partition Kafka topics) rather than bugs. Wired via
+   `rule_files` in `prometheus.yml`, mounted in `docker-compose.yml`.
+
+### Live validation
+
+7. Bringing up the new `zipkin`/`grafana`/`prometheus` containers hit a
+   real, persistent Docker Hub pull stall — `docker compose up` and direct
+   `docker pull` for `openzipkin/zipkin:latest` and `grafana/grafana:latest`
+   both wedged repeatedly (zero byte progress for 4+ minutes at a time)
+   while the daemon itself (`docker ps`/`docker images`) stayed responsive
+   throughout. Killed and retried several times; even a full Docker Desktop
+   restart (asked the user first, since it would stop every running
+   container — they approved) didn't fully resolve it on the first retry
+   after restart. What worked: pulling each image individually and letting
+   Docker resume from whatever layers had already completed, rather than
+   retrying the full multi-image `docker compose up` each time. Also hit a
+   port collision once the containers were finally up: the containerized
+   Grafana's default host port 3000 was already bound by a pre-existing
+   Homebrew-installed native Grafana on this machine (unrelated to this
+   project, running since before this session) — remapped the container to
+   host port 3001 in `docker-compose.yml` rather than touching that
+   unrelated service.
+
+8. Restarted toy-service and booking-service under the same tight
+   log-line-count monitor established as standard practice since Sprint
+   4's disk-fill incident; both started clean (~5s and ~7s respectively),
+   no runaway logging.
+
+9. Verified correlationId end-to-end with a real flow, not just the
+   `OverdueDetectionServiceTest` unit test: logged in as the seeded
+   customer, created a booking with a custom `X-Correlation-ID` header,
+   fired the payment webhook, and confirmed the *same* correlationId
+   appeared in booking-service's `BookingEventProducer`/`PaymentEventProducer`
+   publish logs, the Kafka-consumed `BookingNotificationConsumer` log, and
+   toy-service's `BookingEventConsumer` consume log — the full HTTP →
+   Kafka header → logs chain CLAUDE.md's Correlation ID Rule requires.
+
+10. Verified Zipkin (`/api/v2/services` lists both services; a real trace
+    from the flow above shows genuine spans including Spring Security
+    filter-chain detail), Grafana provisioning (`/api/datasources` shows
+    Prometheus auto-provisioned; `/api/search` shows the dashboard
+    auto-loaded — the actual proof the provisioning fix worked, not just
+    that the JSON is valid), Prometheus alert rules (`/api/v1/rules` shows
+    all 6 loaded with `health":"ok"`), and the payment metric fix live
+    (`payment_success_total{method="UPI"}` and
+    `payment_failed_total{reason="NO_PENDING_PAYMENT_FOUND"}` both present
+    with real label values via `/actuator/prometheus`).
+
+11. Ran the full suite in both services with the correct DB env vars.
+    First attempt without them surfaced a separate, genuinely confusing
+    local-machine issue worth documenting: a native PostgreSQL 15 install
+    (`/Library/PostgreSQL/15`, unrelated to this project) also listens on
+    the default port 5432 on this machine, distinct from this project's
+    Docker Postgres (mapped to host port 5433) — `mvn test` without env
+    vars silently connects to the wrong server and fails Spring context
+    tests with a misleading "password authentication failed" rather than
+    "connection refused". With the correct env vars: toy-service 16/16,
+    booking-service 48/48 (12 test classes) — a full green run, no known
+    environmental failures remaining once pointed at the right database.
+
+**Not done in this session:**
+- Sprint 7 (Performance Engineering) not started — none of CLAUDE.md's six
+  intentional bottlenecks touched.
+- API gateway still has no functional routes; Zipkin tracing deliberately
+  not added there this sprint since there's nothing to trace yet.

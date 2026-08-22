@@ -42,8 +42,7 @@ public class PaymentService {
     private final RazorpayClient razorpayClient;
     private final BookingEventProducer bookingEventProducer;
     private final PaymentEventProducer paymentEventProducer;
-    private final Counter paymentSuccessCounter;
-    private final Counter paymentFailedCounter;
+    private final MeterRegistry meterRegistry;
 
     public PaymentService(PaymentRepository paymentRepository, BookingRepository bookingRepository,
                            RazorpayClient razorpayClient, BookingEventProducer bookingEventProducer,
@@ -53,12 +52,30 @@ public class PaymentService {
         this.razorpayClient = razorpayClient;
         this.bookingEventProducer = bookingEventProducer;
         this.paymentEventProducer = paymentEventProducer;
-        this.paymentSuccessCounter = Counter.builder("payment.success.total")
+        this.meterRegistry = meterRegistry;
+    }
+
+    /**
+     * CLAUDE.md's metric spec tags payment.success.total by method and payment.failed.total by
+     * reason — both open-ended enough (an admin could add a new PaymentMethod; failure reasons
+     * are free-form strings) that pre-building one Counter per value in the constructor isn't a
+     * good fit. Counter.builder(...).register(registry) is idempotent by name+tags, so building
+     * inline at each call site is the standard Micrometer pattern for this.
+     */
+    private void incrementPaymentSuccess(String method) {
+        Counter.builder("payment.success.total")
+                .tag("method", method)
                 .description("Successful payments")
-                .register(meterRegistry);
-        this.paymentFailedCounter = Counter.builder("payment.failed.total")
+                .register(meterRegistry)
+                .increment();
+    }
+
+    private void incrementPaymentFailed(String reason) {
+        Counter.builder("payment.failed.total")
+                .tag("reason", reason)
                 .description("Failed payments")
-                .register(meterRegistry);
+                .register(meterRegistry)
+                .increment();
     }
 
     /**
@@ -141,7 +158,7 @@ public class PaymentService {
                 webhook.razorpayOrderId(), PaymentStatus.PENDING);
 
         if (payments.isEmpty()) {
-            paymentFailedCounter.increment();
+            incrementPaymentFailed("NO_PENDING_PAYMENT_FOUND");
             throw new PaymentFailedException("No pending payment found for razorpay_order_id " + webhook.razorpayOrderId());
         }
 
@@ -150,7 +167,7 @@ public class PaymentService {
             payment.setRazorpayPaymentId(webhook.razorpayPaymentId());
             payment.setRazorpaySignature(webhook.razorpaySignature());
             paymentRepository.save(payment);
-            paymentSuccessCounter.increment();
+            incrementPaymentSuccess(payment.getMethod().name());
         }
 
         // A razorpay_order_id maps 1:1 to a single booking under real Razorpay (every order

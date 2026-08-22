@@ -1213,7 +1213,7 @@ Claude Code must NOT pre-fix these. They are found via JMeter tests.
 | S3 — Booking Service | ✅ Complete | 10/10 |
 | S4 — Kafka Pipeline | ✅ Complete | 10/10 |
 | S5 — Month-End Report | ✅ Complete | 8/8 |
-| S6 — Observability | ⬜ Not started | 0/7 |
+| S6 — Observability | ✅ Complete | 7/7 |
 | S7 — Performance Eng | ⬜ Not started | 0/8 |
 | S8 — Kubernetes | ⬜ Not started | 0/7 |
 | S9 — React Frontend | ⬜ Not started | 0/6 |
@@ -1240,6 +1240,8 @@ Format: date, service, description, root cause, fix applied.
 | 2026-08-22 | booking-service | `createdAt` came back `null` on the same response that created the row | Two layers: `@CreationTimestamp` only populates at flush, which plain `save()` defers to commit; and once switched to `saveAndFlush()`, these entities' manually-assigned ids route Spring Data through `merge()` (returns a different object) instead of `persist()` | `saveAndFlush()`, with the return value reassigned: `booking = bookingRepository.saveAndFlush(booking)` |
 | 2026-08-22 | booking-service | One payment webhook call left a booking with `SUCCESS` payments but `PENDING` status | WireMock's Razorpay stub returns the same static order id for every order; the webhook handler only confirmed the first booking found among matched payments | Group matched payments by distinct `bookingId` and confirm every one found |
 | 2026-08-22 | booking-service | A new Kafka consumer group spun at CPU speed, filling the disk to 100% capacity (19GB log file in under a minute) | No `ErrorHandlingDeserializer` wrapping the value deserializer, so a leftover headerless test message threw a raw `SerializationException` at Kafka's poll loop — entirely outside `DefaultErrorHandler`'s retry/backoff | Wrapped both services' Kafka value deserializers in `ErrorHandlingDeserializer` |
+| 2026-08-22 | booking-service | `payment.success.total`/`payment.failed.total` never carried the `method`/`reason` labels CLAUDE.md's metrics spec requires | Both counters were built once in `PaymentService`'s constructor as fixed, untagged `Counter` instances | Build inline at each increment site with `Counter.builder(...).tag(...).register(meterRegistry)` (Micrometer's `register()` is idempotent by name+tags) |
+| 2026-08-22 | booking-service | `OverdueDetectionService`'s scheduled job logged and published every `booking.overdue` event with an empty `correlationId` | No incoming HTTP request to derive one from, and MDC was never set for this `@Scheduled` method | Generate `"corr-overdue-" + UUID.randomUUID()` and set it via `MDC.put(...)` in try/finally around the method |
 
 ---
 

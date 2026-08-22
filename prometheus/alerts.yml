@@ -1,0 +1,66 @@
+groups:
+  - name: toyrental-availability
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"toy-service|booking-service|api-gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is down"
+          description: "Prometheus has not been able to scrape {{ $labels.job }} for at least 1 minute."
+
+  - name: toyrental-http
+    rules:
+      - alert: HighHttp5xxRate
+        expr: sum by (job) (rate(http_server_requests_seconds_count{status=~"5.."}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} is returning 5xx responses"
+          description: "{{ $labels.job }} has averaged more than 0.1 req/s of 5xx responses over the last 5 minutes."
+
+  - name: toyrental-business
+    rules:
+      - alert: PaymentFailureSpike
+        expr: sum(rate(payment_failed_total[5m])) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Payment failures are elevated"
+          description: "booking-service is recording more than 0.2 failed payments/sec over the last 5 minutes — check WireMock/Razorpay connectivity and recent payment_failed_total{reason=...} values."
+
+      - alert: LowAvailabilityCacheHitRatio
+        expr: |
+          (sum(rate(toy_availability_cache_hit_total[5m])) /
+           (sum(rate(toy_availability_cache_hit_total[5m])) + sum(rate(toy_availability_cache_miss_total[5m])))) < 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "toy-service's Couchbase availability cache hit ratio has dropped below 50%"
+          description: "Likely a cold-cache stampede after a Couchbase restart — the intentional Sprint 7 bottleneck this metric exists to catch (no cache warming on startup yet)."
+
+  - name: toyrental-kafka
+    rules:
+      - alert: KafkaConsumerLagHigh
+        expr: kafka_consumer_fetch_manager_records_lag_max > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer lag is climbing on {{ $labels.job }}"
+          description: "{{ $labels.client_id }} has more than 1000 records of lag — every topic is pinned at 1 partition until Sprint 7 proves the bottleneck, so this is expected to trip under real load, not a bug."
+
+  - name: toyrental-jvm
+    rules:
+      - alert: JvmHeapNearLimit
+        expr: sum by (job) (jvm_memory_used_bytes{area="heap"}) / sum by (job) (jvm_memory_max_bytes{area="heap"}) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} heap usage is above 90%"
+          description: "Sustained high heap usage — check for a leak or, if under soak test, the intentional default-Xmx bottleneck Sprint 7 is meant to find."
