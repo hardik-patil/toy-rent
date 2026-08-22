@@ -39,4 +39,25 @@ public class JwtTokenService {
         return jwtEncoder.encode(JwtEncoderParameters.from(jwsHeader, claims)).getTokenValue();
     }
 
+    /**
+     * Admin identity is a platform-operator concern, not a customer attribute — there is no
+     * admin row in the customers table, just a single configured username checked by
+     * AdminAuthService. The subject is fixed rather than a real id since there's nothing to
+     * look one up from.
+     */
+    public String issueAdminToken(String adminUsername) {
+        Instant now = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer("booking-service")
+                .issuedAt(now)
+                .expiresAt(now.plus(EXPIRY_SECONDS, ChronoUnit.SECONDS))
+                .subject("admin")
+                .claim("name", adminUsername)
+                .claim("roles", List.of("ADMIN"))
+                .build();
+
+        JwsHeader jwsHeader = JwsHeader.with(SignatureAlgorithm.RS256).build();
+        return jwtEncoder.encode(JwtEncoderParameters.from(jwsHeader, claims)).getTokenValue();
+    }
+
 }

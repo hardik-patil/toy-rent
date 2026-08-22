@@ -51,7 +51,13 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/toyrental}
+          # booking-service is this system's only token issuer (self-signed, see its
+          # JwtKeyConfig) — no Keycloak realm was ever provisioned (CLAUDE.md's original
+          # design), so validating against jwk-set-uri here rather than issuer-uri, fetching
+          # the public key straight from booking-service instead of a Keycloak discovery
+          # document that doesn't exist. See SecurityConfig's authority-extraction comment
+          # for the matching claim-shape change this required.
+          jwk-set-uri: ${BOOKING_SERVICE_JWK_SET_URI:http://localhost:8082/oauth2/jwks}
 
 couchbase:
   connection-string: ${COUCHBASE_CONNECTION_STRING:couchbase://localhost}

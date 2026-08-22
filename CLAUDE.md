@@ -1268,7 +1268,10 @@ Format: date, service, description, root cause, fix applied.
 | MINIO_SECRET_KEY | booking-service | minioadmin | MinIO secret key |
 | WIREMOCK_BASE_URL | booking-service | http://localhost:9090 | WireMock endpoint |
 | TOY_SERVICE_URL | booking-service | http://localhost:8081 | Toy service URL for Feign |
-| KEYCLOAK_ISSUER_URI | all services | http://localhost:8180/realms/toyrental | Keycloak realm URI |
+| KEYCLOAK_ISSUER_URI | api-gateway only | http://localhost:8180/realms/toyrental | Keycloak realm URI — no realm has ever been imported, so api-gateway's JWT validation is non-functional; toy-service/booking-service no longer use this at all (see BOOKING_SERVICE_JWK_SET_URI) |
+| BOOKING_SERVICE_JWK_SET_URI | toy-service | http://localhost:8082/oauth2/jwks | Where toy-service fetches booking-service's public key to validate the JWTs booking-service issues (customer and admin) |
+| ADMIN_USERNAME | booking-service | admin | Admin login username, checked by AdminAuthService — not a customers-table row |
+| ADMIN_PASSWORD | booking-service | admin123 | Admin login password |
 | REDIS_HOST | api-gateway | localhost | Redis host |
 | REDIS_PORT | api-gateway | 6379 | Redis port |
 

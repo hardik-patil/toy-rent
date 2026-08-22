@@ -14,7 +14,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtGra
 import org.springframework.security.web.SecurityFilterChain;
 
 import java.util.Collection;
-import java.util.Map;
+import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -54,8 +54,10 @@ public class SecurityConfig {
     }
 
     /**
-     * Keycloak places realm roles under the "realm_access.roles" claim rather than the
-     * default "scope" claim, so authorities must be derived manually to make hasRole() work.
+     * booking-service (this system's only token issuer, see application.yml's jwk-set-uri
+     * comment) puts roles in a flat "roles" claim (e.g. ["ADMIN"]) rather than Keycloak's
+     * nested "realm_access.roles" shape — mirrors booking-service's own SecurityConfig
+     * exactly, since both services must agree on how to read the same tokens.
      */
     private JwtAuthenticationConverter jwtAuthenticationConverter() {
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
@@ -67,15 +69,11 @@ public class SecurityConfig {
         JwtGrantedAuthoritiesConverter scopeConverter = new JwtGrantedAuthoritiesConverter();
         Collection<GrantedAuthority> scopeAuthorities = scopeConverter.convert(jwt);
 
-        Map<String, Object> realmAccess = jwt.getClaim("realm_access");
-        Stream<GrantedAuthority> realmRoleAuthorities = Stream.empty();
-        if (realmAccess != null && realmAccess.get("roles") instanceof Collection<?> roles) {
-            realmRoleAuthorities = roles.stream()
-                    .map(role -> new SimpleGrantedAuthority("ROLE_" + role.toString().toUpperCase()));
-        }
+        List<String> roles = jwt.getClaimAsStringList("roles");
+        Stream<GrantedAuthority> roleAuthorities = roles == null ? Stream.empty()
+                : roles.stream().map(role -> new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()));
 
-        return Stream.concat(scopeAuthorities == null ? Stream.empty() : scopeAuthorities.stream(),
-                        realmRoleAuthorities)
+        return Stream.concat(scopeAuthorities == null ? Stream.empty() : scopeAuthorities.stream(), roleAuthorities)
                 .collect(Collectors.toList());
     }
 

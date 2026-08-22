@@ -10,7 +10,7 @@ infraNamespace: infra
 monitoringNamespace: monitoring
 
 image:
-  tag: "1.0.2"
+  tag: "1.0.3"
   pullPolicy: IfNotPresent
 
 apiGateway:
@@ -86,3 +86,6 @@ secrets:
   minio:
     accessKey: minioadmin
     secretKey: minioadmin
+  admin:
+    username: admin
+    password: admin123

@@ -14,6 +14,8 @@ stringData:
   COUCHBASE_PASSWORD: password
   MINIO_ACCESS_KEY: minioadmin
   MINIO_SECRET_KEY: minioadmin
+  ADMIN_USERNAME: admin
+  ADMIN_PASSWORD: admin123
 
 ---
 apiVersion: apps/v1
@@ -41,7 +43,7 @@ spec:
     spec:
       containers:
         - name: booking-service
-          image: toyrental/booking-service:1.0.2
+          image: toyrental/booking-service:1.0.3
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8082
@@ -82,8 +84,16 @@ spec:
               value: http://wiremock.infra.svc.cluster.local:9090
             - name: TOY_SERVICE_URL
               value: http://toy-service.toy-rental.svc.cluster.local:8081
-            - name: KEYCLOAK_ISSUER_URI
-              value: http://keycloak.infra.svc.cluster.local:8080/realms/toyrental
+            - name: ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: booking-service-secret
+                  key: ADMIN_USERNAME
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: booking-service-secret
+                  key: ADMIN_PASSWORD
             - name: ZIPKIN_ENDPOINT
               value: http://zipkin.monitoring.svc.cluster.local:9411/api/v2/spans
           resources:

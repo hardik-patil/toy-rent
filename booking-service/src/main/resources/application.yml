@@ -41,11 +41,14 @@ spring:
       properties:
         spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: "com.toyrental.*"
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/toyrental}
+
+# Dev-only default credentials, matching this project's established pattern elsewhere
+# (see application.yml's other ${...:default} fallbacks) — override via env vars for
+# anything beyond local dev. Checked by AdminAuthService; not stored anywhere, since
+# admin is a single configured identity, not a customers-table row.
+admin:
+  username: ${ADMIN_USERNAME:admin}
+  password: ${ADMIN_PASSWORD:admin123}
 
 couchbase:
   connection-string: ${COUCHBASE_CONNECTION_STRING:couchbase://localhost}

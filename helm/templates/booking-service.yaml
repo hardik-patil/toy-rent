@@ -11,6 +11,8 @@ stringData:
   COUCHBASE_PASSWORD: {{ .Values.secrets.couchbasePassword | quote }}
   MINIO_ACCESS_KEY: {{ .Values.secrets.minio.accessKey | quote }}
   MINIO_SECRET_KEY: {{ .Values.secrets.minio.secretKey | quote }}
+  ADMIN_USERNAME: {{ .Values.secrets.admin.username | quote }}
+  ADMIN_PASSWORD: {{ .Values.secrets.admin.password | quote }}
 
 ---
 apiVersion: apps/v1
@@ -73,8 +75,16 @@ spec:
               value: http://wiremock.{{ .Values.infraNamespace }}.svc.cluster.local:9090
             - name: TOY_SERVICE_URL
               value: http://toy-service.{{ .Values.namespace }}.svc.cluster.local:8081
-            - name: KEYCLOAK_ISSUER_URI
-              value: http://keycloak.{{ .Values.infraNamespace }}.svc.cluster.local:8080/realms/toyrental
+            - name: ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: booking-service-secret
+                  key: ADMIN_USERNAME
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: booking-service-secret
+                  key: ADMIN_PASSWORD
             - name: ZIPKIN_ENDPOINT
               value: http://zipkin.{{ .Values.monitoringNamespace }}.svc.cluster.local:9411/api/v2/spans
           resources:

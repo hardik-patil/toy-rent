@@ -1043,3 +1043,105 @@ mean every tested value was on the same side of the real threshold.
 `kubectl top pod` (or a deliberately oversized limit as a diagnostic,
 then dialing back once real usage is known) settles it directly instead
 of theorizing about exotic causes.
+
+## Session 8 — 2026-08-22 — Wiring up real admin authentication
+
+**Goal:** User asked "Do admin have inventory management access?" — the honest
+answer was "designed for it (AdminToyController exists, ROLE_ADMIN-gated,
+exactly per CLAUDE.md), but there's no working path to actually get an admin
+token in this codebase." User asked to close that gap.
+
+### Design decision
+
+Asked the user to choose between two approaches: (a) a separate admin login
+with no schema changes (a single configured username/password, admin as a
+platform-operator concern entirely distinct from customers), or (b) flagging
+a customer row as admin via a new `is_admin` column. User chose (a) —
+recommended, since there's no "staff" concept anywhere in the existing schema
+and mixing admin into the customers table would blur two different personas.
+
+### Steps
+
+1. `booking-service`: added `POST /api/v1/admin/login` (new
+   `AdminAuthController`/`AdminAuthService`), checked against
+   `ADMIN_USERNAME`/`ADMIN_PASSWORD` env vars (dev defaults admin/admin123),
+   issuing a JWT with `roles: ["ADMIN"]` via a new `JwtTokenService
+   .issueAdminToken()` method alongside the existing customer-token issuance.
+   Reused the existing `InvalidCredentialsException`/`GlobalExceptionHandler`
+   path for wrong credentials rather than adding a new exception type.
+
+2. `booking-service`: added `GET /oauth2/jwks` (new `JwksController`)
+   exposing the RSA public half of its self-signed signing key as a JWK Set
+   — necessary because the keypair is generated fresh in memory on every
+   restart (Sprint 3's decision), so no other service can validate its
+   tokens against a hardcoded/shared key.
+
+3. `toy-service`: replaced its `issuer-uri` (pointed at a Keycloak realm
+   that was never imported — the actual reason admin routes were completely
+   unreachable before this) with `jwk-set-uri` pointing at booking-service's
+   new endpoint. Updated `SecurityConfig`'s authority-extraction to read the
+   flat `roles` claim booking-service actually issues, instead of Keycloak's
+   nested `realm_access.roles` shape — mirrors booking-service's own
+   converter exactly, since both services must agree on how to read the
+   same tokens.
+
+4. Cleanup: removed booking-service's own leftover `issuer-uri` config line
+   — it was already dead (shadowed by its own custom `JwtDecoder` bean),
+   just misleading to leave in place.
+
+5. Rebuilt both services (jar built on host, Docker image under tag `1.0.3`
+   per this project's established host-build-then-copy pattern), bumped the
+   shared Helm `image.tag` and all three raw `k8s/services/*/*.yaml`
+   references, added `ADMIN_USERNAME`/`ADMIN_PASSWORD` to booking-service's
+   Secret and `BOOKING_SERVICE_JWK_SET_URI` to toy-service's env in both the
+   raw manifests and the Helm templates, `helm upgrade`'d.
+
+### Live validation — a real rolling-update deadlock along the way
+
+Redeploying briefly hit a genuine resource deadlock, not a code bug:
+Kubernetes kept the old (1.0.2) pods running alongside the new (1.0.3) ones
+per normal `RollingUpdate` behavior, waiting for the new pods to pass
+readiness before scaling the old ones down — but with 6 JVMs (3 old + 3 new)
+competing for CPU simultaneously, the new pods took 100+ seconds to start
+(confirmed via log timestamps showing 25+ second gaps between consecutive
+startup lines that normally log within milliseconds) and kept missing their
+liveness probe deadline, restarting repeatedly. **Deleting the old pods
+individually didn't help — their ReplicaSet just respawned replacements,
+making contention worse.** The actual fix: scale the *old ReplicaSets*
+themselves to 0 (`kubectl scale replicaset ... --replicas=0`), which stops
+them from respawning. Once only the 3 new pods remained, they finished
+starting normally within their probe budget.
+
+Full auth test matrix, all live against the running services:
+
+| Check | Result |
+|---|---|
+| `GET /oauth2/jwks` | 200, real JWK Set with a `kid` |
+| Admin login (correct creds) | 200, token with `roles:["ADMIN"]` |
+| Admin login (wrong password) | 401 `INVALID_CREDENTIALS` |
+| Admin token → `GET /api/v1/admin/bookings` (booking-service) | 200, real data |
+| **Admin token → `PUT /api/v1/admin/toys/{id}/condition` (toy-service)** | **200** — the critical test: toy-service validated a token it never issued, purely via fetching booking-service's JWKS |
+| Customer token → admin endpoint on booking-service | 403 |
+| Customer token → admin endpoint on toy-service | 403 |
+| Regular customer flow (login, profile, browse) | Unaffected, still 200 |
+
+Updated the Postman collection: added `Auth > Admin Login` (mirrors customer
+Login's auto-token-capture pattern into `{{adminToken}}`), removed the
+"not runnable" warnings from all four Admin folders, added a JWKS diagnostic
+request to Health & Observability, added `adminUsername`/`adminPassword`
+variables. Re-ran newman against the live services — all core admin
+endpoints (Inventory, Low Stock, All Bookings, Today's Deliveries/Pickups,
+Overdue Returns) returned real 200s. A couple of admin write-endpoint
+requests in that specific run hit expected 404s from earlier requests in the
+same sequential run mutating the same demo toy (delete-then-image-add on
+`toy-002`) — self-inflicted by testing folders out of their intended
+standalone context, not an auth bug. Reactivated `toy-002` afterward via a
+direct Postgres update (no "undelete" endpoint exists) since it's the
+collection's default example toy.
+
+**Not done in this session:**
+- api-gateway's own Keycloak gap is untouched — it still can't route
+  authenticated requests. Only toy-service and booking-service were fixed,
+  since that's what the admin-inventory-access question actually needed.
+  Fixing api-gateway would need the same jwk-set-uri + roles-converter
+  treatment, a natural follow-up if the gateway route ever needs to work.

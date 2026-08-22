@@ -1,14 +1,14 @@
 {
   "info": {
-    "_postman_id": "af4e054c-87ca-43b0-9bf8-292c683822e6",
+    "_postman_id": "449d04ca-41a5-43c2-8078-9441ab20e100",
     "name": "ToyRental Platform API",
-    "description": "Every user- and admin-facing scenario across toy-service (:8081) and booking-service (:8082).\n\n**Base URLs used directly, not through api-gateway.** api-gateway's own JWT validation has the same unresolved Keycloak-realm gap described in the Admin folders below, so it can't currently route any authenticated request end to end \u2014 hitting the two services directly on their own ports is the only path that actually works in this build.\n\n**Auth:** run `Auth > Login` first \u2014 its test script saves the returned token into `{{customerToken}}`, which every other customer request in this collection reads automatically via Bearer auth. The seeded test account is phone `9821012345` / password `password` (Priya Deshmukh).\n\n**Admin folders are documented templates, not currently runnable** \u2014 see the warning at the top of each one. There is no working path to obtain a ROLE_ADMIN token in the current codebase.\n\n**Error shape** (both services, identical): `{timestamp, status, error, message, correlationId, path}`. Send an `X-Correlation-ID` header to trace a request through logs; omit it and you'll see `correlationId: \"unknown\"` in error responses.\n\n**Suggested run order for a full happy-path smoke test:** Auth > Login \u2192 Toys > Check Availability \u2192 Bookings > Create Booking \u2192 Payments > Simulate Razorpay Webhook \u2192 Bookings > Get Booking Detail (confirm status is CONFIRMED).\n\n**If you're editing this collection:** `customerToken`, `adminToken`, `bookingId`, `razorpayOrderId`, `paymentId`, `reportId` are set at runtime by test scripts via `pm.collectionVariables.set()` and intentionally live only as collection variables, not in the environment file \u2014 an environment variable with the same key would always win over what the scripts write (environment outranks collection in Postman's resolution order), silently breaking every authenticated/chained request.",
+    "description": "Every user- and admin-facing scenario across toy-service (:8081) and booking-service (:8082) \u2014 both personas fully working end to end, live-verified.\n\n**Base URLs used directly, not through api-gateway.** api-gateway still validates JWTs against a Keycloak realm (KEYCLOAK_ISSUER_URI) that was never imported, so it can't route authenticated requests \u2014 that gap is specific to api-gateway now, not the two services themselves (they moved to validating booking-service's own JWKS instead, see 'Admin Login' below). Hitting toy-service/booking-service directly on their own ports is the only path that works end to end in this build.\n\n**Auth:** run `Auth > Login` (customer) and/or `Auth > Admin Login` first \u2014 their test scripts save the returned tokens into `{{customerToken}}` / `{{adminToken}}`, which every other request in this collection reads automatically via Bearer auth. Seeded customer: phone `9821012345` / password `password` (Priya Deshmukh). Admin: username `admin` / password `admin123` (a single configured identity, not a customer account \u2014 see Admin Login's description).\n\n**Error shape** (both services, identical): `{timestamp, status, error, message, correlationId, path}`. Send an `X-Correlation-ID` header to trace a request through logs; omit it and you'll see `correlationId: \"unknown\"` in error responses.\n\n**Suggested run order for a full happy-path smoke test:** Auth > Login \u2192 Toys > Check Availability \u2192 Bookings > Create Booking \u2192 Payments > Simulate Razorpay Webhook \u2192 Bookings > Get Booking Detail (confirm status is CONFIRMED). For the admin side: Auth > Admin Login \u2192 Admin \u2014 Toys > Inventory Status \u2192 Admin \u2014 Bookings > All Bookings.\n\n**If you're editing this collection:** `customerToken`, `adminToken`, `bookingId`, `razorpayOrderId`, `paymentId`, `reportId` are set at runtime by test scripts via `pm.collectionVariables.set()` and intentionally live only as collection variables, not in the environment file \u2014 an environment variable with the same key would always win over what the scripts write (environment outranks collection in Postman's resolution order), silently breaking every authenticated/chained request.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
     {
       "name": "Auth",
-      "description": "Registration and login. Login is the only working auth flow in this build \u2014 it always issues a token with roles=[\"CUSTOMER\"]. Run 'Login' once per session; its test script saves the token into {{customerToken}} automatically for every other customer request in this collection.",
+      "description": "Registration and login for both personas. Run 'Login' (customer) and/or 'Admin Login' once per session \u2014 their test scripts save tokens into {{customerToken}} / {{adminToken}} automatically for every other request in this collection. Admin is a separate identity from customers entirely (a single configured username/password, not a customers-table row) \u2014 see 'Admin Login' below for details.",
       "item": [
         {
           "name": "Register Customer",
@@ -91,6 +91,57 @@
                   "    pm.collectionVariables.set('customerToken', json.accessToken);",
                   "    pm.collectionVariables.set('customerId', json.customer.id);",
                   "    console.log('Saved customerToken for ' + json.customer.name);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl_booking}}/api/v1/admin/login",
+              "host": [
+                "{{baseUrl_booking}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "login"
+              ]
+            },
+            "description": "ADMIN SCENARIO: staff logs in to get a JWT with roles=[\"ADMIN\"]. This is a deliberately separate identity from customers \u2014 checked against a single configured username/password (ADMIN_USERNAME/ADMIN_PASSWORD env vars, default admin/admin123 in dev), not a row in the customers table. The token is issued by booking-service (same as customer tokens) but toy-service validates it too, via booking-service's public key at GET /oauth2/jwks \u2014 no separate admin login is needed per service.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{adminUsername}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    pm.collectionVariables.set('adminToken', json.accessToken);",
+                  "    console.log('Saved adminToken');",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -858,8 +909,8 @@
       ]
     },
     {
-      "name": "Admin \u2014 Toys \u26a0\ufe0f requires ROLE_ADMIN (not runnable)",
-      "description": "\u26a0\ufe0f NOT CURRENTLY RUNNABLE in this build. There is no working path to obtain a ROLE_ADMIN token: booking-service's login endpoint hardcodes roles=[\"CUSTOMER\"] on every token it issues (no admin login, no seeded admin user), and toy-service has no JWT decoder of its own \u2014 it falls back to validating against a Keycloak realm (KEYCLOAK_ISSUER_URI) that was never imported, so it can't validate any admin token even if one existed. These requests are documented templates for the intended admin flow, using {{adminToken}} as a placeholder \u2014 they'll all 401/500 until a real admin-auth path is wired up (e.g. a booking-service admin login endpoint that issues roles=[\"ADMIN\"], and a matching JwtDecoder in toy-service that trusts the same signing key/claim shape).",
+      "name": "Admin \u2014 Toys (requires ROLE_ADMIN)",
+      "description": "Requires ROLE_ADMIN \u2014 run Auth > Admin Login first (its test script saves the token into {{adminToken}}, used automatically by every request below). Admin is a separate identity from customers: a single configured username/password (default admin/admin123 in dev), not a customers-table row. Live-verified cross-service: an admin token issued by booking-service is honored by toy-service too, purely via toy-service fetching booking-service's public key at GET /oauth2/jwks \u2014 no separate admin login per service.",
       "item": [
         {
           "name": "Add Toy",
@@ -1169,8 +1220,8 @@
       ]
     },
     {
-      "name": "Admin \u2014 Bookings \u26a0\ufe0f requires ROLE_ADMIN (not runnable)",
-      "description": "\u26a0\ufe0f NOT CURRENTLY RUNNABLE in this build. There is no working path to obtain a ROLE_ADMIN token: booking-service's login endpoint hardcodes roles=[\"CUSTOMER\"] on every token it issues (no admin login, no seeded admin user), and toy-service has no JWT decoder of its own \u2014 it falls back to validating against a Keycloak realm (KEYCLOAK_ISSUER_URI) that was never imported, so it can't validate any admin token even if one existed. These requests are documented templates for the intended admin flow, using {{adminToken}} as a placeholder \u2014 they'll all 401/500 until a real admin-auth path is wired up (e.g. a booking-service admin login endpoint that issues roles=[\"ADMIN\"], and a matching JwtDecoder in toy-service that trusts the same signing key/claim shape).",
+      "name": "Admin \u2014 Bookings (requires ROLE_ADMIN)",
+      "description": "Requires ROLE_ADMIN \u2014 run Auth > Admin Login first (its test script saves the token into {{adminToken}}, used automatically by every request below). Admin is a separate identity from customers: a single configured username/password (default admin/admin123 in dev), not a customers-table row. Live-verified cross-service: an admin token issued by booking-service is honored by toy-service too, purely via toy-service fetching booking-service's public key at GET /oauth2/jwks \u2014 no separate admin login per service.",
       "item": [
         {
           "name": "All Bookings",
@@ -1438,8 +1489,8 @@
       ]
     },
     {
-      "name": "Admin \u2014 Payments \u26a0\ufe0f requires ROLE_ADMIN (not runnable)",
-      "description": "\u26a0\ufe0f NOT CURRENTLY RUNNABLE in this build. There is no working path to obtain a ROLE_ADMIN token: booking-service's login endpoint hardcodes roles=[\"CUSTOMER\"] on every token it issues (no admin login, no seeded admin user), and toy-service has no JWT decoder of its own \u2014 it falls back to validating against a Keycloak realm (KEYCLOAK_ISSUER_URI) that was never imported, so it can't validate any admin token even if one existed. These requests are documented templates for the intended admin flow, using {{adminToken}} as a placeholder \u2014 they'll all 401/500 until a real admin-auth path is wired up (e.g. a booking-service admin login endpoint that issues roles=[\"ADMIN\"], and a matching JwtDecoder in toy-service that trusts the same signing key/claim shape).",
+      "name": "Admin \u2014 Payments (requires ROLE_ADMIN)",
+      "description": "Requires ROLE_ADMIN \u2014 run Auth > Admin Login first (its test script saves the token into {{adminToken}}, used automatically by every request below). Admin is a separate identity from customers: a single configured username/password (default admin/admin123 in dev), not a customers-table row. Live-verified cross-service: an admin token issued by booking-service is honored by toy-service too, purely via toy-service fetching booking-service's public key at GET /oauth2/jwks \u2014 no separate admin login per service.",
       "item": [
         {
           "name": "Refund Booking Deposit",
@@ -1476,8 +1527,8 @@
       ]
     },
     {
-      "name": "Admin \u2014 Reports \u26a0\ufe0f requires ROLE_ADMIN (not runnable)",
-      "description": "\u26a0\ufe0f NOT CURRENTLY RUNNABLE in this build. There is no working path to obtain a ROLE_ADMIN token: booking-service's login endpoint hardcodes roles=[\"CUSTOMER\"] on every token it issues (no admin login, no seeded admin user), and toy-service has no JWT decoder of its own \u2014 it falls back to validating against a Keycloak realm (KEYCLOAK_ISSUER_URI) that was never imported, so it can't validate any admin token even if one existed. These requests are documented templates for the intended admin flow, using {{adminToken}} as a placeholder \u2014 they'll all 401/500 until a real admin-auth path is wired up (e.g. a booking-service admin login endpoint that issues roles=[\"ADMIN\"], and a matching JwtDecoder in toy-service that trusts the same signing key/claim shape).",
+      "name": "Admin \u2014 Reports (requires ROLE_ADMIN)",
+      "description": "Requires ROLE_ADMIN \u2014 run Auth > Admin Login first (its test script saves the token into {{adminToken}}, used automatically by every request below). Admin is a separate identity from customers: a single configured username/password (default admin/admin123 in dev), not a customers-table row. Live-verified cross-service: an admin token issued by booking-service is honored by toy-service too, purely via toy-service fetching booking-service's public key at GET /oauth2/jwks \u2014 no separate admin login per service.",
       "item": [
         {
           "name": "Trigger Month-End Report",
@@ -1805,6 +1856,25 @@
                 "description": "Raw Prometheus scrape output \u2014 every custom + built-in metric this service exposes. Useful to sanity-check a specific counter/timer exists and is incrementing without opening Grafana."
               },
               "response": []
+            },
+            {
+              "name": "JWKS \u2014 Public Key Set",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl_booking}}/oauth2/jwks",
+                  "host": [
+                    "{{baseUrl_booking}}"
+                  ],
+                  "path": [
+                    "oauth2",
+                    "jwks"
+                  ]
+                },
+                "description": "Not really a 'health' check, but lives here as a diagnostic: the public key set toy-service (and anything else validating booking-service's tokens) fetches to verify JWT signatures. If admin/customer requests start failing auth after a booking-service restart, checking this confirms whether the key has actually rotated (it regenerates fresh on every restart) \u2014 compare the 'kid' here against the token's header."
+              },
+              "response": []
             }
           ]
         }
@@ -1845,6 +1915,16 @@
     {
       "key": "customerId",
       "value": "cust-0001",
+      "type": "string"
+    },
+    {
+      "key": "adminUsername",
+      "value": "admin",
+      "type": "string"
+    },
+    {
+      "key": "adminPassword",
+      "value": "admin123",
       "type": "string"
     },
     {

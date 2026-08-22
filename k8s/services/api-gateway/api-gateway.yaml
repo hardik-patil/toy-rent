@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
         - name: api-gateway
-          image: toyrental/api-gateway:1.0.2
+          image: toyrental/api-gateway:1.0.3
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080

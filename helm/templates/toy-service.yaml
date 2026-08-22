@@ -55,8 +55,8 @@ spec:
                   key: COUCHBASE_PASSWORD
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: kafka.{{ .Values.infraNamespace }}.svc.cluster.local:9092
-            - name: KEYCLOAK_ISSUER_URI
-              value: http://keycloak.{{ .Values.infraNamespace }}.svc.cluster.local:8080/realms/toyrental
+            - name: BOOKING_SERVICE_JWK_SET_URI
+              value: http://booking-service.{{ .Values.namespace }}.svc.cluster.local:8082/oauth2/jwks
             - name: ZIPKIN_ENDPOINT
               value: http://zipkin.{{ .Values.monitoringNamespace }}.svc.cluster.local:9411/api/v2/spans
           resources:
