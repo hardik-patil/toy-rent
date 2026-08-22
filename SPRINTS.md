@@ -407,8 +407,9 @@ Fixed by stopping docker-compose during K8s work (`docker compose down` —
 data preserved in named volumes) and building on the host rather than
 inside Docker's build VM (which also fixes finding #2).
 
-**5. Couchbase could not be kept running in this environment — unresolved,
-deferred.** Three layers, each real:
+**5. Couchbase could not be kept running in this environment — resolved in
+a follow-up session, turned out to be much simpler than it looked.** Four
+layers, each real:
    - First, a too-aggressive liveness probe (`initialDelaySeconds: 60`)
      was killing the container mid-startup before Couchbase Server's own
      (genuinely slow) boot sequence could finish — a classic liveness
@@ -416,20 +417,25 @@ deferred.** Three layers, each real:
    - That didn't fully resolve it: `kubectl get pod -o jsonpath` showed
      `reason: OOMKilled`. Escalated the container's own memory limit
      (1Gi → 2Gi → 4Gi) — still OOMKilled, consistently in ~5-7 seconds
-     regardless of the limit (a real gradual memory-hungry startup would
-     survive longer at a bigger limit; this didn't).
+     regardless of the limit (looked like a real gradual memory-hungry
+     startup would survive longer at a bigger limit — this didn't, which
+     was misleading).
    - Raised the whole Docker Desktop VM from ~8GB to ~12GB (user did this
-     via Settings → Resources) to rule out node-wide pressure — no change,
-     still OOMKilled at the same container-level limit. This proved the
-     container's own cgroup ceiling was always the binding constraint, not
-     node capacity, and that Couchbase's actual startup footprint on this
-     specific image/arm64/Docker-Desktop-kind combination is unusually
-     high for reasons not further diagnosed this sprint.
-   - **Decision (user's call):** scaled `couchbase` to 0 replicas and
-     proceeded without it, relying on the app services' documented
-     Couchbase-unavailable fallback behavior. The committed manifest still
-     specifies `replicas: 1` as the intended default — 0 is a live runtime
-     override, not a manifest change. Revisiting this is future work.
+     via Settings → Resources) to rule out node-wide pressure — no change
+     at 4Gi, so this sprint's session ended here: scaled `couchbase` to 0
+     replicas and proceeded without it, documented as unresolved/deferred.
+   - **Follow-up session, resolved:** the "dies in ~5-7s regardless of
+     limit" pattern wasn't actually evidence of a hard ceiling — it just
+     meant every tested limit (up to 4Gi) was below the real threshold, so
+     each attempt died at a similar point in Couchbase's startup sequence
+     regardless of exactly which limit was set. Verified via `kubectl top
+     pod` that Couchbase Server's genuine baseline footprint here (Erlang
+     VM + ns_server + indexer/query init) is **~4.85Gi** — confirmed
+     stable (Ready, 0 restarts, steady ~4.85Gi usage) at both 8Gi and 6Gi
+     limits. No cgroup bug, no arm64 issue, no image-version problem —
+     just a limit that needed one more doubling. Set the committed
+     manifest to `requests: 3Gi / limits: 6Gi` for real headroom without
+     being wasteful.
 
 **6. Couchbase's fallback design didn't actually work — two real code
 bugs found live, both fixed.**
@@ -454,6 +460,28 @@ bugs found live, both fixed.**
      `CouchbaseException` (the SDK's common base class). Applied the
      identical fix to booking-service's `CouchbaseReportRepository` for
      consistency, even though it's off the smoke test's critical path.
+
+**6a. Two more real bugs surfaced only once Couchbase was actually stable
+long enough to reveal them (follow-up session).**
+   - `couchbase-init`/`minio-init` hung indefinitely trying to reach their
+     targets — indistinguishable from Couchbase itself still starting up,
+     which is exactly why this went unnoticed for so long. Root cause:
+     `network-policy.yaml`'s `allow-app-services-to-infra` rule only
+     allowed ingress to `infra` pods from the `toy-rental` namespace — it
+     never allowed same-namespace traffic, so `infra`-namespace Jobs
+     calling `infra`-namespace Services (exactly what these init Jobs do)
+     were silently blocked by `default-deny-ingress`, with a hang instead
+     of a clear rejection. Fixed by adding `podSelector: {}` (same
+     namespace) as an additional allowed source.
+   - Once that was fixed, `couchbase-init` ran but the `monthly-reports`
+     bucket still failed to create, misreported as "already exists" by
+     the script's blanket fallback. Real cause: `--cluster-ramsize 256`
+     left too little room for three 100MB buckets (300MB > 256MB). Fixed
+     by raising it to 512MB, and — since `cluster-init` silently no-ops
+     quota changes on an already-initialized cluster — added a
+     `couchbase-cli setting-cluster` fallback so a Job re-run actually
+     applies new quota values, plus made the bucket-create failure
+     message honest instead of presuming a specific cause.
 
 **7. kind-mode Docker Desktop caches images by tag — same-tag rebuilds
 don't auto-refresh.** After fixing #6, redeploying under the *same* image
@@ -486,6 +514,19 @@ the WireMock payment webhook, and confirmed the booking reached
 `status: CONFIRMED, paymentStatus: SUCCESS`. Prometheus (port-forwarded
 separately) showed all three app services as `up` targets via their
 in-cluster DNS names.
+
+**Follow-up session:** with Couchbase now actually running (finding #5)
+and both init Jobs completing (finding #6a), re-checked the same
+availability endpoint and got a clean response with no fallback
+warning — `AvailabilityService` logged a genuine "No Couchbase
+availability document ... treating as fully available" (a real "not
+found" from a healthy cluster) instead of the earlier "Couchbase
+unavailable" connectivity warning. Verified all three buckets
+(`toy-availability`, `logical-date`, `monthly-reports`) present via
+`couchbase-cli bucket-list`. The fallback code from finding #6 is
+still in place and still correct to keep — it's what makes a future
+Couchbase outage degrade instead of crash — but the platform is no
+longer relying on it to function day-to-day.
 
 ## S9 — React Frontend — 0/6
 

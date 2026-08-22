@@ -946,3 +946,100 @@ probes, and a live smoke test. User explicitly asked to skip Sprint 7
   service port-forwards instead of fixing it, since it's out of this
   sprint's scope.
 - Sprint 9 (React Frontend) not started.
+
+## Session 7 — 2026-08-22 — Follow-up: actually fixing the Couchbase OOMKill
+
+**Goal:** User asked to revisit Session 6's deferred Couchbase issue rather
+than leave it unresolved. Turned out to be a much simpler fix than the
+"unresolved deeper compatibility issue" conclusion Session 6 landed on.
+
+### Steps
+
+1. Scaled `couchbase` back up and reproduced the OOMKill reliably (dies in
+   5-12s, `exitCode 137`/`reason OOMKilled` every time).
+
+2. Ruled out corrupted persisted state as a contributing factor: deleted
+   the `couchbase-data` PVC entirely for a completely fresh volume — still
+   OOMKilled in ~8s. Not a stale-state issue.
+
+3. Working theory shifted to Couchbase 7.2.4's bundled Erlang/OTP having a
+   cgroup v2 memory-detection bug (confirmed this node uses cgroup v2).
+   Tried pulling a much newer image (`couchbase/server:community-8.0.2`)
+   to test — hit a genuine Docker Hub registry stall on this pull
+   specifically (zero progress for 6+ minutes, unlike this session's
+   other "slow but real" pulls), killed and retried twice with no
+   improvement.
+
+4. Pivoted to a differently-tagged Couchbase image already sitting locally
+   on this machine (`couchbase:7.2.0`, Enterprise Edition, no pull
+   needed) as a faster alternate data point. It survived meaningfully
+   longer on first boot (~28-31s vs. 7.2.4's consistent 5-12s) before
+   also eventually OOMKilling on a second boot cycle — a real clue that
+   the crash wasn't happening at the very first instant of startup.
+
+5. Read Couchbase's own internal log files directly (`babysitter.log`,
+   `info.log`) by mounting the same PVC in a throwaway debug pod after
+   scaling the StatefulSet to 0 — something never tried in Session 6,
+   since stdout only ever showed one banner line regardless of how the
+   container died. Confirmed no Erlang crash dump was ever written
+   (expected — a real kernel SIGKILL gives no chance to flush one), and
+   that the process gets meaningfully far into Couchbase's own bootstrap
+   (past babysitter start, past chronicle leader election) before dying,
+   not failing at the very first instant.
+
+6. Tested a much larger container memory limit (8Gi, given the node now
+   has ~12GB after Session 6's VM increase) — **it worked.** `couchbase-0`
+   reached `1/1 Ready` and stayed stable. `kubectl top pod` showed actual
+   steady-state usage of **~4.85Gi** — the real number the whole time.
+   Confirmed the same stability at 6Gi (tighter but still comfortable
+   headroom above the observed usage).
+
+7. **Real root cause:** never a cgroup/Erlang/arm64/image-version bug —
+   Couchbase Server's genuine baseline memory footprint on this setup is
+   ~4.85Gi, and every Session 6 test (1Gi/2Gi/4Gi) was simply below that
+   threshold. Because Couchbase's startup sequence is fairly consistent,
+   every attempt hit the same wall at a similar point regardless of the
+   exact limit, which looked like "dies immediately no matter what" but
+   was really "dies as soon as real usage crosses whatever ceiling is
+   set, and real usage climbs to ~4.85Gi within the first several
+   seconds." Set the committed manifest to `requests: 3Gi / limits: 6Gi`.
+
+8. With Couchbase finally stable long enough to matter, two more real
+   bugs surfaced that Session 6 never had the chance to hit:
+   - `couchbase-init`/`minio-init` Jobs hung indefinitely — root cause:
+     `network-policy.yaml`'s infra-namespace allow rule only permitted
+     ingress from the `toy-rental` namespace, never same-namespace
+     traffic, so `infra`-namespace Jobs calling `infra`-namespace
+     Services were silently blocked by the default-deny policy. This had
+     likely been broken since Session 6 first applied the network
+     policies, but was masked by Couchbase itself never staying up long
+     enough for anyone to notice the difference between "still starting"
+     and "genuinely blocked." Fixed by adding a same-namespace
+     `podSelector: {}` allow source.
+   - Even with that fixed, the `monthly-reports` bucket still failed to
+     create (misreported as "already exists" by the init script's
+     blanket fallback) — real cause: `--cluster-ramsize 256` didn't leave
+     room for three 100MB buckets. Raised to 512MB, and added a
+     `couchbase-cli setting-cluster` fallback since re-running
+     `cluster-init` against an already-initialized cluster silently
+     no-ops instead of applying new quota values.
+
+9. Re-verified live: `/api/v1/toys/{id}/availability` now returns a clean
+   response with a genuine "not found, treating as fully available" log
+   line (not the earlier "Couchbase unavailable" connectivity warning),
+   and all three buckets confirmed present via `couchbase-cli
+   bucket-list`. `minio-init` (which had also been silently failing)
+   completed cleanly once the network policy fix was in.
+
+10. Updated CLAUDE.md's Known Bugs table (flipped the couchbase entry from
+    "unresolved/deferred" to the real fix; added entries for the
+    NetworkPolicy and bucket-quota bugs) and SPRINTS.md's S8 narrative to
+    reflect the actual resolution.
+
+**Lesson worth keeping:** an OOMKilled container that dies at a
+suspiciously *consistent* short duration regardless of the configured
+limit isn't necessarily evidence the limit doesn't matter — it can just
+mean every tested value was on the same side of the real threshold.
+`kubectl top pod` (or a deliberately oversized limit as a diagnostic,
+then dialing back once real usage is known) settles it directly instead
+of theorizing about exotic causes.

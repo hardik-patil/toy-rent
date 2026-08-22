@@ -113,10 +113,15 @@ spec:
     - Ingress
 
 ---
-# infra services are only reachable from toy-rental's app services (never from each
-# other, never from outside the cluster). Ports cover every infra service's client
-# port (Postgres 5432, Couchbase 8091-8096/11210, Kafka 9092, Redis 6379, MinIO
-# 9000, Keycloak 8080, WireMock 9090).
+# infra services are reachable from toy-rental's app services and from other pods
+# within infra itself (the couchbase-init/minio-init Jobs run as infra-namespace
+# pods and need to reach couchbase/minio — confirmed live: without the same-
+# namespace `from` entry below, those Jobs hung on every connection attempt,
+# indistinguishable from Couchbase itself still starting up, which is what made
+# this take so long to notice during the couchbase startup investigation).
+# Never reachable from outside the cluster or from monitoring/kube-system. Ports
+# cover every infra service's client port (Postgres 5432, Couchbase 8091-8096/
+# 11210, Kafka 9092, Redis 6379, MinIO 9000, Keycloak 8080, WireMock 9090).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -136,6 +141,7 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: toy-rental
+        - podSelector: {}
       ports:
         - protocol: TCP
           port: 5432

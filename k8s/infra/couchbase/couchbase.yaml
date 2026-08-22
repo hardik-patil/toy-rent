@@ -52,20 +52,24 @@ spec:
           volumeMounts:
             - name: couchbase-data
               mountPath: /opt/couchbase/var
-          # Confirmed live across three attempts (1Gi, then 2Gi limits, both still
-          # OOMKilled within seconds of startup, independent of node-wide memory —
-          # raising the Docker Desktop VM's own allocation from 8GB to 12GB didn't
-          # change the outcome, proving the container's own cgroup limit was always
-          # the binding constraint, not node capacity) that Couchbase Server's baseline
-          # footprint (Erlang VM + ns_server + indexer, on top of the 256+256MB
-          # configured service quotas) needs meaningfully more than 2Gi just to boot.
+          # Resolved: this was never a cgroup/Erlang detection bug (that was the working
+          # theory for a while, given it OOMKilled within seconds at 1Gi/2Gi/4Gi limits
+          # regardless of raising the whole node's memory from 8GB to 12GB). It was
+          # simpler than that — Couchbase Server's real baseline footprint on this setup
+          # (Erlang VM + ns_server + indexer/query init, on top of the 256+256MB
+          # configured service quotas) is genuinely ~4.85Gi, confirmed via `kubectl top
+          # pod` once it was finally given enough room to boot. 4Gi was just under that
+          # threshold, so every attempt died at a similar point in startup regardless of
+          # the exact limit tried, which looked like a hard ceiling but wasn't. Verified
+          # stable (Ready, no restarts, steady ~4.85Gi usage) at both 8Gi and 6Gi limits;
+          # 6Gi is kept as the real value for reasonable headroom without being wasteful.
           resources:
             requests:
               cpu: 250m
-              memory: 2Gi
+              memory: 3Gi
             limits:
               cpu: 1500m
-              memory: 4Gi
+              memory: 6Gi
           readinessProbe:
             httpGet:
               path: /ui/index.html
@@ -179,19 +183,32 @@ spec:
                 echo "waiting for couchbase..."; sleep 5
               done
 
-              # 256MB is Couchbase's own enforced minimum per service quota — kept lean
-              # deliberately: this is a single-node Docker Desktop VM, not a real cluster,
-              # and live debugging this sprint found the node genuinely OOM-killing
-              # couchbase at the original 512+256 quota once every other service (Kafka,
-              # Postgres, Keycloak, the whole K8s control plane, etc.) was also running.
+              # This --cluster-ramsize is the data SERVICE's soft cache quota, not the
+              # container's actual memory ceiling (that's set separately as the container
+              # resources below, and unrelated — Couchbase's own process footprint of
+              # ~4.85Gi is fixed overhead regardless of this number). 256MB previously left
+              # too little room for all three buckets (3 x 100MB > 256MB), so the third
+              # bucket-create silently failed with "ramQuota ... too large" and got
+              # misreported by this script's fallback as "already exists" — confirmed live
+              # once cluster-init/bucket-create could finally run against a stable
+              # couchbase-0. 512MB comfortably fits all three with room to spare.
+              # cluster-init only applies these quotas on a brand-new cluster — on a
+              # cluster that's already initialized (any re-run of this Job) it just
+              # errors and leaves the existing quota untouched, so setting-cluster is
+              # needed too to make a ramsize bump actually take effect on a re-run.
               couchbase-cli cluster-init -c couchbase:8091 \
                 --cluster-username "$CB_USERNAME" --cluster-password "$CB_PASSWORD" \
-                --cluster-ramsize 256 --cluster-index-ramsize 256 \
-                --services data,index,query || echo "cluster already initialized, continuing"
+                --cluster-ramsize 512 --cluster-index-ramsize 256 \
+                --services data,index,query || {
+                  echo "cluster already initialized, updating quota instead"
+                  couchbase-cli setting-cluster -c couchbase:8091 \
+                    -u "$CB_USERNAME" -p "$CB_PASSWORD" \
+                    --cluster-ramsize 512 --cluster-index-ramsize 256
+                }
 
               for bucket in toy-availability logical-date monthly-reports; do
                 couchbase-cli bucket-create -c couchbase:8091 \
                   -u "$CB_USERNAME" -p "$CB_PASSWORD" \
                   --bucket "$bucket" --bucket-type couchbase \
-                  --bucket-ramsize 100 || echo "bucket $bucket already exists, continuing"
+                  --bucket-ramsize 100 || echo "bucket-create for $bucket failed (already exists, or another real error — check logs above)"
               done
