@@ -1,0 +1,172 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    rule_files:
+      - "/etc/prometheus/alerts.yml"
+
+    scrape_configs:
+      - job_name: api-gateway
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["api-gateway.toy-rental.svc.cluster.local:8080"]
+
+      - job_name: toy-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["toy-service.toy-rental.svc.cluster.local:8081"]
+
+      - job_name: booking-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["booking-service.toy-rental.svc.cluster.local:8082"]
+  alerts.yml: |
+    groups:
+      - name: toyrental-availability
+        rules:
+          - alert: ServiceDown
+            expr: up{job=~"toy-service|booking-service|api-gateway"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "{{ $labels.job }} is down"
+              description: "Prometheus has not been able to scrape {{ $labels.job }} for at least 1 minute."
+
+      - name: toyrental-http
+        rules:
+          - alert: HighHttp5xxRate
+            expr: sum by (job) (rate(http_server_requests_seconds_count{status=~"5.."}[5m])) > 0.1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "{{ $labels.job }} is returning 5xx responses"
+              description: "{{ $labels.job }} has averaged more than 0.1 req/s of 5xx responses over the last 5 minutes."
+
+      - name: toyrental-business
+        rules:
+          - alert: PaymentFailureSpike
+            expr: sum(rate(payment_failed_total[5m])) > 0.2
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Payment failures are elevated"
+              description: "booking-service is recording more than 0.2 failed payments/sec over the last 5 minutes — check WireMock/Razorpay connectivity and recent payment_failed_total{reason=...} values."
+
+          - alert: LowAvailabilityCacheHitRatio
+            expr: |
+              (sum(rate(toy_availability_cache_hit_total[5m])) /
+               (sum(rate(toy_availability_cache_hit_total[5m])) + sum(rate(toy_availability_cache_miss_total[5m])))) < 0.5
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "toy-service's Couchbase availability cache hit ratio has dropped below 50%"
+              description: "Likely a cold-cache stampede after a Couchbase restart — the intentional Sprint 7 bottleneck this metric exists to catch (no cache warming on startup yet)."
+
+      - name: toyrental-kafka
+        rules:
+          - alert: KafkaConsumerLagHigh
+            expr: kafka_consumer_fetch_manager_records_lag_max > 1000
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kafka consumer lag is climbing on {{ $labels.job }}"
+              description: "{{ $labels.client_id }} has more than 1000 records of lag — every topic is pinned at 1 partition until Sprint 7 proves the bottleneck, so this is expected to trip under real load, not a bug."
+
+      - name: toyrental-jvm
+        rules:
+          - alert: JvmHeapNearLimit
+            expr: sum by (job) (jvm_memory_used_bytes{area="heap"}) / sum by (job) (jvm_memory_max_bytes{area="heap"}) > 0.9
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "{{ $labels.job }} heap usage is above 90%"
+              description: "Sustained high heap usage — check for a leak or, if under soak test, the intentional default-Xmx bottleneck Sprint 7 is meant to find."
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prometheus
+        app.kubernetes.io/version: "1.0.0"
+        app.kubernetes.io/part-of: toy-rental
+        app.kubernetes.io/managed-by: kubectl
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:latest
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: data
+              mountPath: /prometheus
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 20
+            periodSeconds: 15
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: data
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  selector:
+    app.kubernetes.io/name: prometheus
+  ports:
+    - port: 9090
+      targetPort: 9090

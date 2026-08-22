@@ -1,0 +1,33 @@
+# Everything routes through api-gateway (per CLAUDE.md, it owns routing, JWT
+# validation, rate limiting, correlation ID, circuit breaking) — toy-service and
+# booking-service are never exposed outside the cluster directly.
+#
+# Requires an ingress controller. Docker Desktop's Kubernetes ships none by
+# default; install ingress-nginx first:
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.1/deploy/static/provider/cloud/deploy.yaml
+# then add "127.0.0.1 toy-rental.local" to /etc/hosts.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: toy-rental-ingress
+  namespace: toy-rental
+  labels:
+    app.kubernetes.io/name: toy-rental-ingress
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+  annotations:
+    nginx.ingress.kubernetes.io/correlation-id-header: X-Correlation-ID
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: toy-rental.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 8080

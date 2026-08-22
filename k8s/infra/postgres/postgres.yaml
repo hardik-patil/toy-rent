@@ -1,0 +1,135 @@
+# Dev-only credentials, matching docker-compose.yml's existing plaintext defaults
+# (this project's established security posture — see application.yml's
+# ${POSTGRES_PASSWORD:toypass} fallbacks). Never reuse these values for a real
+# deployment.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: postgres
+  TOY_SERVICE_PASSWORD: toypass
+  BOOKING_SERVICE_PASSWORD: bookingpass
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+data:
+  init-databases.sh: |
+    #!/bin/bash
+    set -e
+
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+        CREATE USER toyuser WITH PASSWORD 'toypass';
+        CREATE DATABASE toydb OWNER toyuser;
+
+        CREATE USER bookinguser WITH PASSWORD 'bookingpass';
+        CREATE DATABASE bookingdb OWNER bookinguser;
+    EOSQL
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/version: "1.0.0"
+        app.kubernetes.io/part-of: toy-rental
+        app.kubernetes.io/managed-by: kubectl
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_DB
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: postgres-init
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+      volumes:
+        - name: postgres-init
+          configMap:
+            name: postgres-init
+            # Without this, the mounted init script isn't executable and
+            # docker-entrypoint-initdb.d silently skips it — the exact bug
+            # CLAUDE.md's Known Bugs table already caught once for the
+            # docker-compose equivalent of this file.
+            defaultMode: 0755
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+  clusterIP: None

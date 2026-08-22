@@ -1,0 +1,88 @@
+# Default values — mirrors CLAUDE.md's documented resource requests/limits,
+# HPA config, and probe timings exactly. values-dev.yaml / values-prod.yaml
+# override replica counts and HPA ranges for their respective environments;
+# everything else (probe paths/timings, resource shape) stays constant across
+# environments since CLAUDE.md doesn't document per-environment variants of
+# those.
+
+namespace: toy-rental
+infraNamespace: infra
+monitoringNamespace: monitoring
+
+image:
+  tag: "1.0.2"
+  pullPolicy: IfNotPresent
+
+apiGateway:
+  replicas: 2
+  image:
+    repository: toyrental/api-gateway
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    cpuUtilization: 60
+
+toyService:
+  replicas: 2
+  image:
+    repository: toyrental/toy-service
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    cpuUtilization: 60
+
+bookingService:
+  replicas: 2
+  image:
+    repository: toyrental/booking-service
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    cpuUtilization: 60
+
+probes:
+  liveness:
+    path: /actuator/health/liveness
+    initialDelaySeconds: 60
+    periodSeconds: 15
+  readiness:
+    path: /actuator/health/readiness
+    initialDelaySeconds: 30
+    periodSeconds: 10
+
+# Dev-only credentials matching docker-compose.yml's existing plaintext
+# defaults (see application.yml's ${POSTGRES_PASSWORD:toypass} fallbacks).
+# Never reuse for a real deployment — override via --set or a separate,
+# untracked values file instead.
+secrets:
+  postgres:
+    toyServicePassword: toypass
+    bookingServicePassword: bookingpass
+  couchbasePassword: password
+  minio:
+    accessKey: minioadmin
+    secretKey: minioadmin

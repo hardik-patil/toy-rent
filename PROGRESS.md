@@ -790,3 +790,159 @@ via Zipkin, and Prometheus alerting rules.
   intentional bottlenecks touched.
 - API gateway still has no functional routes; Zipkin tracing deliberately
   not added there this sprint since there's nothing to trace yet.
+
+## Session 6 — 2026-08-22 — Sprint 8: Kubernetes (Sprint 7 skipped at user's request)
+
+**Goal:** Deploy the platform to Docker Desktop's Kubernetes — raw manifests
+for infra + app services, a Helm chart for the three app services, HPA,
+probes, and a live smoke test. User explicitly asked to skip Sprint 7
+(performance engineering) and do it manually themselves.
+
+### Steps
+
+1. Wrote Dockerfiles (multi-stage Maven build initially) for all three
+   services, plus the full `k8s/` tree: `namespace.yaml` (toy-rental/infra/
+   monitoring), `ingress.yaml` (everything through api-gateway only),
+   `network-policy.yaml` (default-deny + explicit allows enforcing
+   CLAUDE.md's DB-isolation rule at the network layer), `k8s/infra/*` for
+   all 7 infra components plus prometheus/grafana/zipkin (StatefulSets for
+   stateful services, `couchbase-init`/`minio-init` Jobs replacing
+   docker-compose's manual setup step), `k8s/services/*` for the three app
+   services with CLAUDE.md's exact probe timings/resource limits/HPA
+   numbers, and a full Helm chart (`Chart.yaml`, `values.yaml`,
+   `values-dev.yaml`, `values-prod.yaml`, `templates/`) templating just the
+   three app services.
+
+2. Docker Desktop's Kubernetes was disabled with no CLI toggle available
+   (`docker desktop` CLI only exposes `kubernetes status/reset-cluster/
+   images`) — asked the user to enable it via Settings, which they did.
+
+3. Hit the same Docker Hub registry-pull stall pattern from Sprint 6,
+   twice — once for `kind`'s own node-image pull, once for the toy-service
+   build's base image. Both eventually cleared with patience/retries; one
+   round needed a full Docker Desktop restart.
+
+4. Discovered the build stalls weren't really about Docker Hub at all:
+   `docker build`'s Maven dependency downloads inside the build VM were
+   getting near-zero throughput, while a direct host-side `curl` to Maven
+   Central showed ~120KB/s — real, working bandwidth. Root-caused this as
+   the build VM's own network path being the bottleneck. Fixed by
+   building each jar on the host (`./mvnw package -DskipTests`, fast since
+   `~/.m2` was warm from this session's many `mvn test` runs) and
+   rewriting all three Dockerfiles to a simple `COPY target/*.jar app.jar`
+   single-stage build, eliminating the in-container Maven step entirely.
+   Found and fixed a real bug along the way: `api-gateway/mvnw` was
+   missing its executable bit (same class of bug as Session 1's
+   `init-databases.sh`).
+
+5. With docker-compose *and* the K8s cluster *and* 3 concurrent builds all
+   running at once, the Docker Desktop VM's original ~8GB budget was
+   exceeded — `kube-scheduler`/`kube-controller-manager` crash-looped from
+   failing their own health checks under resource starvation. Fixed by
+   stopping docker-compose (`docker compose down`, data preserved in named
+   volumes) during K8s work.
+
+6. Applied all `k8s/infra/*` and `k8s/services/*` manifests, plus
+   `network-policy.yaml` and `metrics-server` (not shipped by default on
+   Docker Desktop's Kubernetes, needed patching with
+   `--kubelet-insecure-tls` for kind's self-signed kubelet certs).
+
+7. `couchbase-0` would not stabilize — a three-layer investigation:
+   - A too-aggressive `livenessProbe` (`initialDelaySeconds: 60`) was
+     killing the container mid-startup before Couchbase Server's own slow
+     boot could finish. Fixed by raising it to 120s.
+   - Still crash-looping — `kubectl get pod -o jsonpath` revealed
+     `reason: OOMKilled`. Escalated the container's own memory limit
+     (1Gi → 2Gi → 4Gi); still OOMKilled every time, consistently within
+     ~5-7 seconds regardless of the limit — inconsistent with a genuine
+     gradual memory-hungry startup, which would survive longer at a
+     bigger limit.
+   - Asked the user to raise the whole Docker Desktop VM's memory from
+     ~8GB to ~12GB to rule out node-wide pressure (they did, via Settings
+     → Resources) — no change in outcome, proving the container's own
+     cgroup limit was always the binding constraint, not node capacity.
+     The actual root cause (why Couchbase's baseline footprint on this
+     image/arm64/Docker-Desktop-kind combination exceeds 4Gi to boot) was
+     not further diagnosed. Asked the user how to proceed; they chose to
+     scale Couchbase to 0 replicas and continue without it, relying on
+     the app services' documented graceful-degradation fallbacks — a
+     legitimate, real limitation left open for future investigation, not
+     silently worked around.
+
+8. Deployed the app services via `helm install toy-rental helm/ -f
+   helm/values-dev.yaml` — confirmed kind-mode Docker Desktop DOES share
+   locally-built images with the cluster (no `kind load` step needed; the
+   standalone `kind` CLI can't even see this cluster, since it runs inside
+   Docker Desktop's own VM, not as a host-visible sibling container).
+
+9. The live smoke test immediately proved Couchbase's fallback design
+   didn't actually work as documented — two real bugs found and fixed:
+   - `CouchbaseConfig` in both services called `bucket.waitUntilReady()`
+     synchronously inside a `@Bean` factory method, which throws and
+     fails the *entire* Spring context if Couchbase is unreachable — far
+     worse than the intended graceful degradation, since the downstream
+     fallback logic never gets the chance to run if the bean itself never
+     exists. Fixed with a try/catch that logs a warning and returns the
+     bucket reference anyway (`cluster.bucket(name)` itself never
+     blocks — only `waitUntilReady` does).
+   - Even after that, booking creation still 500'd:
+     `CouchbaseAvailabilityRepository.findByToyId()` only caught
+     `DocumentNotFoundException`, not the broader connectivity failure a
+     fully-down Couchbase actually throws, so it propagated uncaught
+     through `AvailabilityService` and crashed `/availability`.
+     `LogicalDateService` already caught `RuntimeException` broadly and
+     was fine — only the availability repository had the narrower gap.
+     Broadened the catch to `CouchbaseException` (the SDK's common base
+     class). Applied the identical fix to booking-service's
+     `CouchbaseReportRepository` for consistency.
+
+10. Redeploying the fix under the *same* image tag silently didn't work —
+    the new pods kept running the old broken code. Root-caused: kind-mode
+    Docker Desktop's node containerd caches images by tag and doesn't
+    auto-refresh a same-tag rebuild from the host. Fixed by bumping the
+    tag (ended at `1.0.2` after two fix iterations) and updating both the
+    Helm values and the raw manifests to match — a real operational
+    lesson for any future iteration on this specific setup.
+
+### Live validation
+
+11. Full flow via direct `kubectl port-forward` to toy-service (8081) and
+    booking-service (8082), bypassing api-gateway — its own Spring
+    Security JWT resource-server config points at Keycloak's issuer-uri,
+    but Keycloak's realm was never imported (a known Sprint 3/4 gap, not
+    something this sprint introduced or is scoped to fix, since
+    booking-service actually issues its own self-signed JWTs). Registered
+    a customer, logged in, called `/api/v1/toys/{id}/availability`
+    directly and confirmed the fix live (`available: true` plus a real
+    `Couchbase unavailable ... treating as absent` WARN in toy-service's
+    logs, not a 500), created a booking, fired the WireMock payment
+    webhook, and confirmed the booking reached `status: CONFIRMED,
+    paymentStatus: SUCCESS`.
+
+12. Port-forwarded Prometheus separately and confirmed all three app
+    services (`api-gateway`, `toy-service`, `booking-service`) showed as
+    `up` targets via their in-cluster DNS names.
+
+13. Updated `SPRINTS.md`/`CLAUDE.md`'s sprint trackers (S7 marked skipped,
+    S8 marked complete) and `CLAUDE.md`'s Known Bugs table with all five
+    real bugs found this sprint (mvnw executable bit; the resource-
+    contention crash-loop; couchbase left unresolved/deferred; the
+    CouchbaseConfig eager-connection bug in both services; the
+    CouchbaseAvailabilityRepository/CouchbaseReportRepository narrow-catch
+    bug in both services).
+
+**Not done in this session:**
+- Sprint 7 (Performance Engineering) skipped at the user's explicit
+  request — none of CLAUDE.md's six intentional bottlenecks touched, and
+  the K8s manifests deliberately carry the same unfixed config forward.
+- Couchbase is not actually running in the K8s deployment (scaled to 0,
+  unresolved OOM issue) — genuinely open, not a false "fixed" claim.
+- `minio-init`'s Job kept failing/retrying intermittently even once
+  `minio-0` itself was stable — non-blocking for the smoke test (only
+  affects month-end PDF report storage, not exercised this sprint), left
+  running in the background rather than chased further.
+- api-gateway's JWT validation is still blocked on the pre-existing
+  Keycloak-realm gap from Sprint 3/4 — smoke-tested around it via direct
+  service port-forwards instead of fixing it, since it's out of this
+  sprint's scope.
+- Sprint 9 (React Frontend) not started.

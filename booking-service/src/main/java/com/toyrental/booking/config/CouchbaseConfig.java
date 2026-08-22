@@ -46,9 +46,22 @@ public class CouchbaseConfig {
 
     @Bean(name = "reportsBucket")
     public Bucket reportsBucket(Cluster cluster, CouchbaseProperties props) {
-        Bucket bucket = cluster.bucket(props.getBucket().getReports());
-        bucket.waitUntilReady(Duration.ofSeconds(10));
-        log.info("Connected to Couchbase bucket={}", props.getBucket().getReports());
+        String bucketName = props.getBucket().getReports();
+        Bucket bucket = cluster.bucket(bucketName);
+        try {
+            bucket.waitUntilReady(Duration.ofSeconds(10));
+            log.info("Connected to Couchbase bucket={}", bucketName);
+        } catch (RuntimeException e) {
+            // cluster.bucket(name) above never blocks — only waitUntilReady does — so it's
+            // safe to swallow this and return the (not-yet-verified) bucket reference rather
+            // than fail application startup entirely (confirmed live: without this, Couchbase
+            // being unreachable took the whole service down with it instead of degrading).
+            // Month-end report generation will fail if it actually tries to use this bucket
+            // while Couchbase is still down, but that's a narrow, expected failure mode —
+            // not a reason to block every other endpoint from starting.
+            log.warn("Couchbase bucket={} not ready within timeout — starting anyway: {}",
+                    bucketName, e.getMessage());
+        }
         return bucket;
     }
 

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: toy-rental
+description: ToyRental Platform — api-gateway, toy-service, booking-service
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

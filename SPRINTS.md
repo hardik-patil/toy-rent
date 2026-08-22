@@ -25,8 +25,8 @@ For the detailed step-by-step build record behind the checked items, see
 | S4 — Kafka Pipeline | ✅ Complete | 10/10 |
 | S5 — Month-End Report | ✅ Complete | 8/8 |
 | S6 — Observability | ✅ Complete | 7/7 |
-| S7 — Performance Eng | ⬜ Not started | 0/8 |
-| S8 — Kubernetes | ⬜ Not started | 0/7 |
+| S7 — Performance Eng | ⏭️ Skipped (user doing manually) | 0/8 |
+| S8 — Kubernetes | ✅ Complete | 7/7 |
 | S9 — React Frontend | ⬜ Not started | 0/6 |
 
 ---
@@ -312,34 +312,180 @@ cases added this sprint — a real coverage gap since Sprint 3, since
 `PaymentService` had no dedicated test file despite containing the
 multi-booking-per-order-id logic).
 
-## S7 — Performance Engineering — 0/8
+## S7 — Performance Engineering — ⏭️ Skipped 0/8
 
-Matches the six intentional bottlenecks documented in CLAUDE.md, plus test
-tooling and writeup:
+Skipped at the user's explicit request (2026-08-22) — they're doing the
+performance-engineering work manually themselves rather than having Claude
+Code do it. None of CLAUDE.md's six intentional bottlenecks have been
+touched, and S8's manifests below deliberately carry the same unfixed
+config forward unchanged (small HikariCP pool, no Couchbase cache warming,
+1-partition Kafka topics, no circuit breaker wiring, default JVM heap,
+missing composite index) — nothing in this sprint pre-fixes any of them.
 
-- [ ] JMeter test plans (catalogue browse load, concurrent booking load, soak)
-- [ ] Prove + fix missing composite index on `toys(category, age_group,
-      is_active, status)`
-- [ ] Prove + fix no cache warming on Couchbase startup (`ApplicationReadyEvent`)
-- [ ] Prove + fix booking-service HikariCP pool exhaustion (10 → 30)
-- [ ] Prove + fix Kafka single-partition consumer lag (→ 6 partitions)
-- [ ] Prove + fix WireMock retry storm (wire the existing Resilience4j
-      `razorpay` circuit breaker config into the actual call path)
-- [ ] Prove + fix JVM heap/GC pressure under soak (`-Xmx512m -XX:+UseG1GC`)
-- [ ] Performance test report/writeup (before/after for each bottleneck)
+## S8 — Kubernetes ✅ 7/7 (2026-08-22)
 
-## S8 — Kubernetes — 0/7
+- [x] `k8s/namespace.yaml`, `ingress.yaml`, `network-policy.yaml` — three
+      namespaces (`toy-rental`/`infra`/`monitoring`) matching CLAUDE.md's
+      table; ingress routes everything through `api-gateway` only (per
+      CLAUDE.md, toy-service/booking-service are never exposed directly);
+      network policy default-denies ingress in both `toy-rental` and
+      `infra`, then explicitly allows app-services → infra, api-gateway →
+      app-services, and monitoring → app-services (Prometheus scrape),
+      enforcing CLAUDE.md's "no service touches another's database" rule
+      at the network layer, not just via credentials.
+- [x] `k8s/infra/*` manifests (postgres, couchbase, kafka, redis, minio,
+      keycloak, wiremock) — StatefulSets for the four stateful services
+      (postgres, couchbase, kafka, minio), Deployments for the rest, all
+      with readiness/liveness probes. `couchbase-init`/`minio-init` Jobs
+      replace docker-compose's manual "create the cluster/buckets via the
+      web console" step so a fresh deploy is smoke-testable without a
+      human clicking through a UI.
+- [x] `k8s/infra/{prometheus,grafana}` manifests — same content as
+      Sprint 6's docker-compose config, retargeted at in-cluster DNS names
+      (`toy-service.toy-rental.svc.cluster.local` etc. instead of
+      `host.docker.internal`); Grafana's provisioning ConfigMaps carry the
+      same auto-provisioned datasource + dashboard as Sprint 6. Also added
+      `k8s/infra/zipkin` (not in CLAUDE.md's original list, added after
+      Sprint 6's tracing work — CLAUDE.md's Namespaces section already
+      places it in `monitoring`).
+- [x] `k8s/services/*` manifests (api-gateway, toy-service, booking-service)
+      with probes + resource requests/limits from CLAUDE.md — exact numbers
+      from CLAUDE.md's tables (requests/limits, liveness
+      initialDelay=60s/period=15s, readiness initialDelay=30s/period=10s).
+- [x] HPA per service (min/max replicas, CPU target from CLAUDE.md) — exact
+      numbers from CLAUDE.md's table (toy-service/booking-service 2-8 @
+      60%, api-gateway 2-10 @ 60%); confirmed via `helm template` that HPA
+      objects render correctly and are conditionally skippable per
+      environment.
+- [x] Helm chart (`Chart.yaml`, `values.yaml`, `values-dev.yaml`,
+      `values-prod.yaml`, templates) — templates the three app services
+      only (infra stays as raw manifests, matching how a real org would
+      typically split "platform team owns infra via plain YAML/Helm
+      subcharts" from "app team owns their own service chart"). `values-dev`
+      drops to 1 replica/service and disables HPA (a 1-node kind cluster
+      has nothing to scale across); `values-prod` explicitly re-states
+      CLAUDE.md's numbers so a real install doesn't silently depend on
+      `values.yaml` never drifting.
+- [x] Deploy to Docker Desktop Kubernetes + smoke test — see the full
+      story below; ended in a genuine end-to-end pass (register → login →
+      browse → book → pay → CONFIRMED) via direct service port-forwards,
+      with Prometheus confirming all three app services `up`.
 
-- [ ] `k8s/namespace.yaml`, `ingress.yaml`, `network-policy.yaml`
-- [ ] `k8s/infra/*` manifests (postgres, couchbase, kafka, redis, minio,
-      keycloak, wiremock)
-- [ ] `k8s/infra/{prometheus,grafana}` manifests
-- [ ] `k8s/services/*` manifests (api-gateway, toy-service, booking-service)
-      with probes + resource requests/limits from CLAUDE.md
-- [ ] HPA per service (min/max replicas, CPU target from CLAUDE.md)
-- [ ] Helm chart (`Chart.yaml`, `values.yaml`, `values-dev.yaml`,
-      `values-prod.yaml`, templates)
-- [ ] Deploy to Docker Desktop Kubernetes + smoke test
+### The real story — this was an unusually rough infra sprint
+
+**1. Two Docker Hub registry-pull stalls (recurrence of the Sprint 6
+pattern).** Both `docker compose up` for zipkin/grafana/prometheus and
+`kind`'s own node-image pull got stuck with zero progress for extended
+periods, even though the daemon itself stayed responsive. Root-caused as
+the same class of registry stall Sprint 6 hit, not a new issue — resolved
+each time by killing and retrying, and once by a full Docker Desktop
+restart.
+
+**2. Docker's *build* VM has a much slower network path than the host
+itself, for this environment.** Building the three services' images via
+a standard multi-stage `mvn package` Dockerfile stalled repeatedly — but a
+direct `docker pull` and a direct host-side `curl` to Maven Central both
+showed real (~120KB/s) throughput. Confirmed decisively: the build VM's
+network path was the bottleneck, not general connectivity. Fixed by
+building each service's jar on the *host* (`./mvnw package -DskipTests` —
+fast, since `~/.m2` was already warm from this session's many `mvn test`
+runs) and rewriting all three Dockerfiles to a simple single-stage
+`COPY target/*.jar app.jar`, eliminating the in-container Maven step
+entirely. `.dockerignore` updated to exclude `target/*` except
+`!target/*.jar`.
+
+**3. `api-gateway/mvnw` was missing its executable bit.** Same class of
+bug as `docker/postgres-init/init-databases.sh` in Sprint 1 — caught while
+building the jar on the host for the fix above. `chmod +x`.
+
+**4. Resource contention crash-looped the K8s control plane.** Running
+the full docker-compose stack *and* the K8s cluster *and* 3 concurrent
+Maven/JVM builds simultaneously exceeded the Docker Desktop VM's original
+~8GB budget — `kube-scheduler`/`kube-controller-manager` went into
+CrashLoopBackOff from failing their own health checks under starvation.
+Fixed by stopping docker-compose during K8s work (`docker compose down` —
+data preserved in named volumes) and building on the host rather than
+inside Docker's build VM (which also fixes finding #2).
+
+**5. Couchbase could not be kept running in this environment — unresolved,
+deferred.** Three layers, each real:
+   - First, a too-aggressive liveness probe (`initialDelaySeconds: 60`)
+     was killing the container mid-startup before Couchbase Server's own
+     (genuinely slow) boot sequence could finish — a classic liveness
+     death spiral. Fixed by raising it to 120s.
+   - That didn't fully resolve it: `kubectl get pod -o jsonpath` showed
+     `reason: OOMKilled`. Escalated the container's own memory limit
+     (1Gi → 2Gi → 4Gi) — still OOMKilled, consistently in ~5-7 seconds
+     regardless of the limit (a real gradual memory-hungry startup would
+     survive longer at a bigger limit; this didn't).
+   - Raised the whole Docker Desktop VM from ~8GB to ~12GB (user did this
+     via Settings → Resources) to rule out node-wide pressure — no change,
+     still OOMKilled at the same container-level limit. This proved the
+     container's own cgroup ceiling was always the binding constraint, not
+     node capacity, and that Couchbase's actual startup footprint on this
+     specific image/arm64/Docker-Desktop-kind combination is unusually
+     high for reasons not further diagnosed this sprint.
+   - **Decision (user's call):** scaled `couchbase` to 0 replicas and
+     proceeded without it, relying on the app services' documented
+     Couchbase-unavailable fallback behavior. The committed manifest still
+     specifies `replicas: 1` as the intended default — 0 is a live runtime
+     override, not a manifest change. Revisiting this is future work.
+
+**6. Couchbase's fallback design didn't actually work — two real code
+bugs found live, both fixed.**
+   - `CouchbaseConfig` in both services called `bucket.waitUntilReady(...)`
+     synchronously inside a `@Bean` factory method — if Couchbase is
+     unreachable, this throws and fails the *entire* Spring context, which
+     is worse than CLAUDE.md's documented design (graceful degradation).
+     The downstream fallback logic (`AvailabilityService.loadOrDefault()`,
+     `LogicalDateService`'s wall-clock fallback) only helps once a `Bucket`
+     bean actually exists — it never got the chance to run. Fixed by
+     wrapping `waitUntilReady` in try/catch and returning the (unverified)
+     bucket reference anyway, since `cluster.bucket(name)` itself never
+     blocks.
+   - Even after that fix, the live smoke test's booking-creation step
+     still 500'd: `CouchbaseAvailabilityRepository.findByToyId()` only
+     caught `DocumentNotFoundException`, not the broader connectivity
+     failure Couchbase being fully down actually throws — so it propagated
+     uncaught through `AvailabilityService` and crashed the
+     `/availability` endpoint. `LogicalDateService` already caught
+     `RuntimeException` broadly and was fine; only the availability
+     repository had the narrower gap. Fixed by broadening the catch to
+     `CouchbaseException` (the SDK's common base class). Applied the
+     identical fix to booking-service's `CouchbaseReportRepository` for
+     consistency, even though it's off the smoke test's critical path.
+
+**7. kind-mode Docker Desktop caches images by tag — same-tag rebuilds
+don't auto-refresh.** After fixing #6, redeploying under the *same* image
+tag (`1.0.0`) still ran the old, broken code — the cluster's node
+containerd had its own cached copy keyed by tag, and a host-side rebuild
+under an identical tag doesn't invalidate it. Lesson for any future
+iteration on this setup: always bump the tag (or delete pods forcibly) to
+force a genuinely fresh pull. Ended up rebuilding under `1.0.1` then
+`1.0.2` as the fixes landed.
+
+**8. Pre-existing, not-a-Sprint-8 finding: api-gateway can't validate
+JWTs.** Its Spring Security JWT resource-server config points at
+`http://keycloak.infra.svc.cluster.local:8080/realms/toyrental`, but per
+Sprint 3's approved architectural decision, booking-service issues its own
+self-signed RSA JWTs and no Keycloak realm was ever imported — Keycloak's
+OIDC discovery document simply doesn't exist. This is a known gap from
+Sprint 3/4, not something this sprint introduced or is scoped to fix. The
+smoke test bypassed api-gateway and hit toy-service/booking-service
+directly via `kubectl port-forward`, which is a fully legitimate way to
+validate the K8s deployment mechanics.
+
+### Live validation
+
+Full flow via direct service port-forwards (bypassing api-gateway per
+finding #8): registered a customer, logged in, checked
+`/api/v1/toys/{id}/availability` directly (confirmed the finding-#6 fix —
+`available: true` with a live `Couchbase unavailable ... treating as
+absent` WARN in toy-service's logs, not a 500), created a booking, fired
+the WireMock payment webhook, and confirmed the booking reached
+`status: CONFIRMED, paymentStatus: SUCCESS`. Prometheus (port-forwarded
+separately) showed all three app services as `up` targets via their
+in-cluster DNS names.
 
 ## S9 — React Frontend — 0/6
 

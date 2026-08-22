@@ -1,0 +1,136 @@
+# Secrets are namespace-scoped, so this mirrors (not references) the relevant
+# keys from infra's postgres-secret/couchbase-secret — same dev-only values,
+# just duplicated into toy-rental so toy-service's Pod can mount them.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: toy-service-secret
+  namespace: toy-rental
+  labels:
+    app.kubernetes.io/name: toy-service
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: toypass
+  COUCHBASE_PASSWORD: password
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: toy-service
+  namespace: toy-rental
+  labels:
+    app.kubernetes.io/name: toy-service
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: toy-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: toy-service
+        app.kubernetes.io/version: "1.0.0"
+        app.kubernetes.io/part-of: toy-rental
+        app.kubernetes.io/managed-by: kubectl
+    spec:
+      containers:
+        - name: toy-service
+          image: toyrental/toy-service:1.0.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8081
+          env:
+            - name: POSTGRES_HOST
+              value: postgres.infra.svc.cluster.local
+            - name: POSTGRES_USER
+              value: toyuser
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: toy-service-secret
+                  key: POSTGRES_PASSWORD
+            - name: COUCHBASE_CONNECTION_STRING
+              value: couchbase://couchbase.infra.svc.cluster.local
+            - name: COUCHBASE_USERNAME
+              value: Administrator
+            - name: COUCHBASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: toy-service-secret
+                  key: COUCHBASE_PASSWORD
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka.infra.svc.cluster.local:9092
+            - name: KEYCLOAK_ISSUER_URI
+              value: http://keycloak.infra.svc.cluster.local:8080/realms/toyrental
+            - name: ZIPKIN_ENDPOINT
+              value: http://zipkin.monitoring.svc.cluster.local:9411/api/v2/spans
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: toy-service
+  namespace: toy-rental
+  labels:
+    app.kubernetes.io/name: toy-service
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  selector:
+    app.kubernetes.io/name: toy-service
+  ports:
+    - port: 8081
+      targetPort: 8081
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: toy-service
+  namespace: toy-rental
+  labels:
+    app.kubernetes.io/name: toy-service
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: toy-service
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60

@@ -1,5 +1,6 @@
 package com.toyrental.booking.couchbase;
 
+import com.couchbase.client.core.error.CouchbaseException;
 import com.couchbase.client.core.error.DocumentNotFoundException;
 import com.couchbase.client.java.Bucket;
 import com.couchbase.client.java.Collection;
@@ -25,6 +26,15 @@ public class CouchbaseReportRepository {
                     .contentAs(MonthlyReportDocument.class);
             return Optional.of(document);
         } catch (DocumentNotFoundException e) {
+            return Optional.empty();
+        } catch (CouchbaseException e) {
+            // Same class of gap found live in toy-service's CouchbaseAvailabilityRepository
+            // this sprint: a genuine connectivity failure isn't a DocumentNotFoundException,
+            // so it would otherwise propagate uncaught. The month-end trigger consumer's
+            // idempotency check ("does this report already exist?") should treat "can't tell,
+            // Couchbase is down" the same as "doesn't exist yet" rather than crash the consumer.
+            log.warn("Couchbase unavailable while checking for existing report month={} year={}: {}",
+                    month, year, e.getMessage());
             return Optional.empty();
         }
     }

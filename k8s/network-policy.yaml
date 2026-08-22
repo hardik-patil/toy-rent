@@ -1,0 +1,165 @@
+# Enforces CLAUDE.md's "no service ever touches another service's database" boundary
+# at the network layer, on top of the credential-level isolation already provided by
+# separate Postgres roles/databases and separate Couchbase buckets: infra-namespace
+# pods (postgres, couchbase, kafka, redis, minio, keycloak, wiremock) only accept
+# traffic from the toy-rental namespace's app services, never from each other or from
+# outside the cluster; toy-rental pods only accept traffic from api-gateway (or the
+# ingress controller) and from monitoring (Prometheus scraping /actuator/prometheus).
+
+---
+# Default-deny all ingress in toy-rental, then allow explicit paths below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: toy-rental
+  labels:
+    app.kubernetes.io/name: default-deny-ingress
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# api-gateway: reachable from the ingress controller (any namespace, port 8080 only)
+# and from monitoring (Prometheus scrape).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-gateway-ingress
+  namespace: toy-rental
+  labels:
+    app.kubernetes.io/name: allow-api-gateway-ingress
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: api-gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    - from: []
+      ports:
+        - protocol: TCP
+          port: 8080
+
+---
+# toy-service / booking-service: reachable from api-gateway, from each other (the
+# booking -> toy internal Feign call), and from monitoring (Prometheus scrape).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-services-ingress
+  namespace: toy-rental
+  labels:
+    app.kubernetes.io/name: allow-app-services-ingress
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [toy-service, booking-service]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: api-gateway
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: toy-service
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: booking-service
+      ports:
+        - protocol: TCP
+          port: 8081
+        - protocol: TCP
+          port: 8082
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8081
+        - protocol: TCP
+          port: 8082
+
+---
+# Default-deny all ingress in infra, then allow explicit paths below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: default-deny-ingress
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# infra services are only reachable from toy-rental's app services (never from each
+# other, never from outside the cluster). Ports cover every infra service's client
+# port (Postgres 5432, Couchbase 8091-8096/11210, Kafka 9092, Redis 6379, MinIO
+# 9000, Keycloak 8080, WireMock 9090).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-services-to-infra
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: allow-app-services-to-infra
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: toy-rental
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 8091
+        - protocol: TCP
+          port: 8092
+        - protocol: TCP
+          port: 8093
+        - protocol: TCP
+          port: 8094
+        - protocol: TCP
+          port: 8095
+        - protocol: TCP
+          port: 8096
+        - protocol: TCP
+          port: 11210
+        - protocol: TCP
+          port: 9092
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 9090

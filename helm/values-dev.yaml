@@ -1,0 +1,17 @@
+# Lighter footprint for local Docker Desktop iteration — single replica per
+# service, HPA disabled (a 1-node kind cluster has nothing meaningful to scale
+# across, and constantly-flapping HPA decisions just add noise while iterating).
+apiGateway:
+  replicas: 1
+  hpa:
+    enabled: false
+
+toyService:
+  replicas: 1
+  hpa:
+    enabled: false
+
+bookingService:
+  replicas: 1
+  hpa:
+    enabled: false

@@ -1,0 +1,197 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: couchbase-secret
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: couchbase
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+type: Opaque
+stringData:
+  COUCHBASE_USERNAME: Administrator
+  COUCHBASE_PASSWORD: password
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: couchbase
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: couchbase
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  serviceName: couchbase
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: couchbase
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: couchbase
+        app.kubernetes.io/version: "1.0.0"
+        app.kubernetes.io/part-of: toy-rental
+        app.kubernetes.io/managed-by: kubectl
+    spec:
+      containers:
+        - name: couchbase
+          image: couchbase/server:community-7.2.4
+          ports:
+            - containerPort: 8091
+            - containerPort: 8092
+            - containerPort: 8093
+            - containerPort: 8094
+            - containerPort: 8095
+            - containerPort: 8096
+            - containerPort: 11210
+          volumeMounts:
+            - name: couchbase-data
+              mountPath: /opt/couchbase/var
+          # Confirmed live across three attempts (1Gi, then 2Gi limits, both still
+          # OOMKilled within seconds of startup, independent of node-wide memory —
+          # raising the Docker Desktop VM's own allocation from 8GB to 12GB didn't
+          # change the outcome, proving the container's own cgroup limit was always
+          # the binding constraint, not node capacity) that Couchbase Server's baseline
+          # footprint (Erlang VM + ns_server + indexer, on top of the 256+256MB
+          # configured service quotas) needs meaningfully more than 2Gi just to boot.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 2Gi
+            limits:
+              cpu: 1500m
+              memory: 4Gi
+          readinessProbe:
+            httpGet:
+              path: /ui/index.html
+              port: 8091
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 12
+          # Couchbase Server's own internal startup is slow and was observed live to
+          # sometimes exceed 60s — a liveness probe that fires before it's actually up
+          # kills the container mid-startup, which restarts it, which never lets it
+          # finish starting: a classic liveness-probe death spiral (confirmed via
+          # `kubectl describe pod` showing 5+ restarts, each killed by "Liveness probe
+          # failed" a few seconds after the container was created). Generous initialDelay
+          # + failureThreshold gives it real room; readinessProbe still gates traffic
+          # long before this would ever fire under normal operation.
+          livenessProbe:
+            httpGet:
+              path: /ui/index.html
+              port: 8091
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            failureThreshold: 6
+  volumeClaimTemplates:
+    - metadata:
+        name: couchbase-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: couchbase
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: couchbase
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  selector:
+    app.kubernetes.io/name: couchbase
+  ports:
+    - name: mgmt
+      port: 8091
+    - name: mgmt-ssl
+      port: 8092
+    - name: views
+      port: 8093
+    - name: query
+      port: 8094
+    - name: search
+      port: 8095
+    - name: eventing
+      port: 8096
+    - name: kv
+      port: 11210
+  clusterIP: None
+
+---
+# One-shot cluster + bucket provisioning, replacing docker-compose's manual
+# "create the cluster and buckets via the web console" step (noted in
+# docker-compose.yml's couchbase comment) so a fresh K8s deploy is smoke-
+# testable without a human clicking through the UI. Safe to re-run: cluster-init
+# fails harmlessly against an already-initialized node, bucket-create likewise
+# against an existing bucket — both are swallowed so the Job still exits 0.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: couchbase-init
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: couchbase-init
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: couchbase-init
+        app.kubernetes.io/version: "1.0.0"
+        app.kubernetes.io/part-of: toy-rental
+        app.kubernetes.io/managed-by: kubectl
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: couchbase-init
+          image: couchbase/server:community-7.2.4
+          env:
+            - name: CB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: couchbase-secret
+                  key: COUCHBASE_USERNAME
+            - name: CB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: couchbase-secret
+                  key: COUCHBASE_PASSWORD
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              until curl -sf http://couchbase:8091/ui/index.html > /dev/null; do
+                echo "waiting for couchbase..."; sleep 5
+              done
+
+              # 256MB is Couchbase's own enforced minimum per service quota — kept lean
+              # deliberately: this is a single-node Docker Desktop VM, not a real cluster,
+              # and live debugging this sprint found the node genuinely OOM-killing
+              # couchbase at the original 512+256 quota once every other service (Kafka,
+              # Postgres, Keycloak, the whole K8s control plane, etc.) was also running.
+              couchbase-cli cluster-init -c couchbase:8091 \
+                --cluster-username "$CB_USERNAME" --cluster-password "$CB_PASSWORD" \
+                --cluster-ramsize 256 --cluster-index-ramsize 256 \
+                --services data,index,query || echo "cluster already initialized, continuing"
+
+              for bucket in toy-availability logical-date monthly-reports; do
+                couchbase-cli bucket-create -c couchbase:8091 \
+                  -u "$CB_USERNAME" -p "$CB_PASSWORD" \
+                  --bucket "$bucket" --bucket-type couchbase \
+                  --bucket-ramsize 100 || echo "bucket $bucket already exists, continuing"
+              done

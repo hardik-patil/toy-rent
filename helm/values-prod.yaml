@@ -1,0 +1,27 @@
+# Explicit re-statement of CLAUDE.md's documented production numbers (base
+# values.yaml already matches these — this file exists so a real prod install
+# doesn't depend on the base file never drifting, and so the intent is
+# explicit at the call site: `helm install -f values-prod.yaml`).
+apiGateway:
+  replicas: 2
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    cpuUtilization: 60
+
+toyService:
+  replicas: 2
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    cpuUtilization: 60
+
+bookingService:
+  replicas: 2
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    cpuUtilization: 60

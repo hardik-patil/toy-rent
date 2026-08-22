@@ -1,0 +1,133 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: booking-service-secret
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "toy-rental.labels" (dict "name" "booking-service" "root" $) | nindent 4 }}
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: {{ .Values.secrets.postgres.bookingServicePassword | quote }}
+  COUCHBASE_PASSWORD: {{ .Values.secrets.couchbasePassword | quote }}
+  MINIO_ACCESS_KEY: {{ .Values.secrets.minio.accessKey | quote }}
+  MINIO_SECRET_KEY: {{ .Values.secrets.minio.secretKey | quote }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: booking-service
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "toy-rental.labels" (dict "name" "booking-service" "root" $) | nindent 4 }}
+spec:
+  replicas: {{ .Values.bookingService.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: booking-service
+  template:
+    metadata:
+      labels:
+        {{- include "toy-rental.labels" (dict "name" "booking-service" "root" $) | nindent 8 }}
+    spec:
+      containers:
+        - name: booking-service
+          image: "{{ .Values.bookingService.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8082
+          env:
+            - name: POSTGRES_HOST
+              value: postgres.{{ .Values.infraNamespace }}.svc.cluster.local
+            - name: POSTGRES_USER
+              value: bookinguser
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: booking-service-secret
+                  key: POSTGRES_PASSWORD
+            - name: COUCHBASE_CONNECTION_STRING
+              value: couchbase://couchbase.{{ .Values.infraNamespace }}.svc.cluster.local
+            - name: COUCHBASE_USERNAME
+              value: Administrator
+            - name: COUCHBASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: booking-service-secret
+                  key: COUCHBASE_PASSWORD
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka.{{ .Values.infraNamespace }}.svc.cluster.local:9092
+            - name: MINIO_ENDPOINT
+              value: http://minio.{{ .Values.infraNamespace }}.svc.cluster.local:9000
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: booking-service-secret
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: booking-service-secret
+                  key: MINIO_SECRET_KEY
+            - name: WIREMOCK_BASE_URL
+              value: http://wiremock.{{ .Values.infraNamespace }}.svc.cluster.local:9090
+            - name: TOY_SERVICE_URL
+              value: http://toy-service.{{ .Values.namespace }}.svc.cluster.local:8081
+            - name: KEYCLOAK_ISSUER_URI
+              value: http://keycloak.{{ .Values.infraNamespace }}.svc.cluster.local:8080/realms/toyrental
+            - name: ZIPKIN_ENDPOINT
+              value: http://zipkin.{{ .Values.monitoringNamespace }}.svc.cluster.local:9411/api/v2/spans
+          resources:
+            {{- toYaml .Values.bookingService.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: 8082
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: 8082
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: booking-service
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "toy-rental.labels" (dict "name" "booking-service" "root" $) | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: booking-service
+  ports:
+    - port: 8082
+      targetPort: 8082
+
+{{- if .Values.bookingService.hpa.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: booking-service
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "toy-rental.labels" (dict "name" "booking-service" "root" $) | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: booking-service
+  minReplicas: {{ .Values.bookingService.hpa.minReplicas }}
+  maxReplicas: {{ .Values.bookingService.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.bookingService.hpa.cpuUtilization }}
+{{- end }}

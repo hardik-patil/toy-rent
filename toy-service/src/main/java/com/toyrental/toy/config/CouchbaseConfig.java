@@ -60,8 +60,22 @@ public class CouchbaseConfig {
 
     private Bucket openBucket(Cluster cluster, String bucketName) {
         Bucket bucket = cluster.bucket(bucketName);
-        bucket.waitUntilReady(Duration.ofSeconds(10));
-        log.info("Connected to Couchbase bucket={}", bucketName);
+        try {
+            bucket.waitUntilReady(Duration.ofSeconds(10));
+            log.info("Connected to Couchbase bucket={}", bucketName);
+        } catch (RuntimeException e) {
+            // cluster.bucket(name) above never blocks — only waitUntilReady does — so it's
+            // safe to swallow this and return the (not-yet-verified) bucket reference rather
+            // than fail application startup entirely. Every caller of this bucket already
+            // has a documented fallback for Couchbase being unavailable (LogicalDateService
+            // falls back to the wall clock, AvailabilityService's loadOrDefault() treats a
+            // missing/unreachable document as fully available) — but those fallbacks only
+            // help if the bean can be created in the first place. Confirmed live: without
+            // this, Couchbase being down took the whole service down with it instead of
+            // degrading, directly contradicting CLAUDE.md's stated fallback design.
+            log.warn("Couchbase bucket={} not ready within timeout — starting anyway, relying on caller-side fallbacks: {}",
+                    bucketName, e.getMessage());
+        }
         return bucket;
     }
 
