@@ -7,6 +7,9 @@ metadata:
     app.kubernetes.io/version: "1.0.0"
     app.kubernetes.io/part-of: toy-rental
     app.kubernetes.io/managed-by: kubectl
+    # Matches k8s/infra/dynatrace/dynakube.yaml's namespaceSelector — the
+    # Dynatrace Operator's webhook injects OneAgent into every pod created here.
+    dynatrace-injection: "enabled"
 ---
 apiVersion: v1
 kind: Namespace
@@ -24,6 +27,16 @@ metadata:
   name: monitoring
   labels:
     app.kubernetes.io/name: monitoring
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dynatrace
+  labels:
+    app.kubernetes.io/name: dynatrace
     app.kubernetes.io/version: "1.0.0"
     app.kubernetes.io/part-of: toy-rental
     app.kubernetes.io/managed-by: kubectl

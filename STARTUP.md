@@ -109,6 +109,33 @@ Prometheus: `http://localhost:9090`.
 
 ---
 
+## Dynatrace Operator (one-time setup)
+
+Not part of the regular stop/start cycle — the operator Deployment isn't scaled to 0 by
+the shutdown flow this runbook mirrors, so this only needs doing once per cluster, not on
+every startup.
+
+```bash
+# Pin to a specific released version — check
+# https://github.com/Dynatrace/dynatrace-operator/releases for the current one and
+# update both this command and dynakube.yaml's apiVersion to match:
+kubectl apply -f https://github.com/Dynatrace/dynatrace-operator/releases/download/vX.Y.Z/kubernetes.yaml
+kubectl -n dynatrace wait pod --for=condition=ready --selector=app.kubernetes.io/name=dynatrace-operator --timeout=300s
+
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/infra/dynatrace/
+```
+
+`k8s/infra/dynatrace/secret.yaml` ships with placeholder tokens — replace `apiToken`/
+`dataIngestToken` with real values from your Dynatrace tenant, and `dynakube.yaml`'s
+`spec.apiUrl` with your real environment URL, before OneAgent data will actually reach a
+tenant. Until then, `kubectl get dynakube -n dynatrace` reports a connectivity/auth error
+in status — expected, and it doesn't block pod injection itself. See `CLAUDE.md`'s
+Kubernetes section for what's monitored (toy-rental namespace, applicationMonitoring
+mode only).
+
+---
+
 ## Troubleshooting
 
 **A pod stays `0/1` for more than ~5 minutes, or is restarting repeatedly:**

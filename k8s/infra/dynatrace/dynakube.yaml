@@ -1,0 +1,31 @@
+# Binds OneAgent injection to the toy-rental namespace via the Dynatrace Operator's
+# mutating webhook. No Deployment/Helm template needs editing — any pod in a namespace
+# matching spec.namespaceSelector below gets an "install-oneagent" init container
+# injected automatically on creation.
+#
+# Prerequisite: the Dynatrace Operator (CRDs + webhook + CSI driver) must already be
+# installed — see STARTUP.md's "Dynatrace Operator (one-time setup)" section. The
+# apiVersion below must match whatever operator release gets installed; verify against
+# https://github.com/Dynatrace/dynatrace-operator/releases at install time.
+#
+# spec.apiUrl and the tokens in secret.yaml are dev-only placeholders. Until replaced
+# with a real Dynatrace tenant URL + tokens, `kubectl get dynakube -n dynatrace` will
+# report a connectivity/auth error in status — expected, and does not block injection.
+apiVersion: dynatrace.com/v1beta3
+kind: DynaKube
+metadata:
+  name: toy-rental-oneagent
+  namespace: dynatrace
+  labels:
+    app.kubernetes.io/name: toy-rental-oneagent
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  apiUrl: "https://ENVIRONMENT_ID.live.dynatrace.com/api"
+  tokens: dynakube-tokens
+  oneAgent:
+    applicationMonitoring: {}
+  namespaceSelector:
+    matchLabels:
+      dynatrace-injection: "enabled"
