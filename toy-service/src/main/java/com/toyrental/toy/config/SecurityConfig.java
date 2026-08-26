@@ -1,5 +1,6 @@
 package com.toyrental.toy.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -26,15 +27,17 @@ import java.util.stream.Stream;
 public class SecurityConfig {
 
     /**
-     * The React dev server (Vite, localhost:5173) calls this service directly from the
-     * browser — bypassing api-gateway, which stays out of scope per this session's existing
-     * decision (Keycloak-based JWT validation there was never wired up). No production
-     * frontend origin exists yet, so this is dev-only permissiveness.
+     * The React frontend calls this service directly from the browser — bypassing
+     * api-gateway, which stays out of scope per this session's existing decision
+     * (Keycloak-based JWT validation there was never wired up). ALLOWED_CORS_ORIGINS
+     * lets the AWS deployment add its CloudFront origin without touching this default,
+     * which stays the Vite dev server pattern for local dev.
      */
     @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
+    public CorsConfigurationSource corsConfigurationSource(
+            @Value("${ALLOWED_CORS_ORIGINS:http://localhost:*}") List<String> allowedOrigins) {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOriginPatterns(List.of("http://localhost:*"));
+        config.setAllowedOriginPatterns(allowedOrigins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
@@ -44,9 +47,9 @@ public class SecurityConfig {
     }
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, CorsConfigurationSource corsConfigurationSource) throws Exception {
         http
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize

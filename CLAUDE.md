@@ -1059,6 +1059,7 @@ Namespaces:
   toy-rental    → application services (api-gateway, toy-service, booking-service)
   infra         → infrastructure (postgres, couchbase, kafka, redis, minio, keycloak, wiremock)
   monitoring    → observability (prometheus, grafana, zipkin)
+  dynatrace     → Dynatrace Operator (OneAgent injection webhook, CSI driver)
 
 Standard labels on every K8s resource:
   app.kubernetes.io/name: {service-name}
@@ -1079,6 +1080,65 @@ Resource requests/limits per service pod:
 Liveness probe:  /actuator/health/liveness  initialDelay=60s period=15s
 Readiness probe: /actuator/health/readiness initialDelay=30s period=10s
 ```
+
+---
+
+## Dynatrace OneAgent
+
+Deep-code APM (JVM method tracing, DB/Couchbase/Kafka call timing) alongside the existing
+Prometheus/Grafana/Zipkin stack — installed via the **Dynatrace Operator**, not a manual
+sidecar. The operator watches a `DynaKube` custom resource and injects an OneAgent init
+container into every pod in a namespace matched by that CR's `namespaceSelector` — no
+Deployment or Helm template changes needed for injection itself.
+
+```
+Manifests:    k8s/infra/dynatrace/dynakube.yaml, k8s/infra/dynatrace/secret.yaml
+Namespace:    dynatrace (operator + webhook + CSI driver)
+Mode:         applicationMonitoring only — no host-level OneAgent DaemonSet, kept
+              lighter for this single-node Docker Desktop cluster
+Scope:        toy-rental namespace only (api-gateway, toy-service, booking-service),
+              via the toy-rental namespace's dynatrace-injection: "enabled" label —
+              infra and monitoring namespaces are NOT instrumented
+Install:      one-time, not part of the regular stop/start cycle — see STARTUP.md's
+              "Dynatrace Operator (one-time setup)" section
+```
+
+`spec.apiUrl` in `dynakube.yaml` and both tokens in `secret.yaml` are dev-only
+placeholders (same convention as `helm/values.yaml`'s `secrets:` block). Until replaced
+with a real Dynatrace tenant URL and tokens, `kubectl get dynakube -n dynatrace` reports a
+connectivity/auth error in status — expected, and does not block pod injection itself.
+
+See `DYNATRACE.md` for the fuller what/how writeup.
+
+---
+
+## AWS Elastic Beanstalk Deployment
+
+A real, publicly reachable deployment for this project's secondary "real business launch"
+goal — runs **alongside**, not instead of, the Kubernetes deployment above, which stays
+the local performance-engineering/learning environment.
+
+```
+Region:    ap-south-1 (Mumbai) — matches the business's actual Navi Mumbai market
+Backend:   3 EB single-container-Docker environments (api-gateway, toy-service,
+           booking-service), each pulling its image from its own ECR repo
+Frontend:  static Vite build (frontend/dist) on S3 + CloudFront, not a 4th EB
+           environment
+Infra:     Postgres/Couchbase/Kafka/Redis/MinIO/Keycloak/WireMock/Prometheus/
+           Grafana/Zipkin self-hosted on one EC2 instance, reusing
+           docker-compose.yml unchanged — no managed RDS/MSK/ElastiCache/Capella
+           for this pass, to avoid their cost on a solo/toy-scale deployment
+Manifests: <service>/Dockerrun.aws.json, <service>/.ebextensions/environment.config
+           for all three backend services
+```
+
+toy-service's and booking-service's CORS allow-list is now the `ALLOWED_CORS_ORIGINS` env
+var (defaults to `http://localhost:*`, unchanged for local dev) instead of a hardcoded
+value, so the CloudFront origin can be added without a code change per deployment.
+
+See `AWS_DEPLOY.md` for the fuller what/how writeup, exact commands, and known
+limitations of this first pass (HTTP-only mixed-content workaround, no autoscaling,
+single AZ).
 
 ---
 
