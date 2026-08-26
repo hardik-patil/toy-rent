@@ -78,5 +78,5 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} correlationId=%X{correlationId} - %msg%n"
   level:
-    com.toyrental: DEBUG
+    com.toyrental: ${LOG_LEVEL:DEBUG}
     org.springframework.cloud.gateway: INFO

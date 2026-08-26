@@ -26,6 +26,11 @@ spring:
     locations: classpath:db/migration
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    listener:
+      # Applies to every @KafkaListener in this service (one shared container factory,
+      # see KafkaConsumerConfig) — there's only one consumer group here (toy-service-cg),
+      # so this is also effectively that group's concurrency.
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:1}
     consumer:
       group-id: toy-service-cg
       auto-offset-reset: earliest
@@ -103,5 +108,5 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} correlationId=%X{correlationId} traceId=%X{traceId} spanId=%X{spanId} - %msg%n"
   level:
-    com.toyrental: DEBUG
+    com.toyrental: ${LOG_LEVEL:DEBUG}
     org.springframework.kafka: INFO

@@ -18,6 +18,23 @@ stringData:
   ADMIN_PASSWORD: admin123
 
 ---
+# Applies to every @KafkaListener in this service (one shared container factory) —
+# all three consumer groups here (notification-cg, booking-internal-cg, report-cg)
+# share this same concurrency value, not independently tunable per group.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: booking-service-config
+  namespace: toy-rental
+  labels:
+    app.kubernetes.io/name: booking-service
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+data:
+  KAFKA_LISTENER_CONCURRENCY: "1"
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -68,6 +85,11 @@ spec:
                   key: COUCHBASE_PASSWORD
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: kafka.infra.svc.cluster.local:9092
+            - name: KAFKA_LISTENER_CONCURRENCY
+              valueFrom:
+                configMapKeyRef:
+                  name: booking-service-config
+                  key: KAFKA_LISTENER_CONCURRENCY
             - name: MINIO_ENDPOINT
               value: http://minio.infra.svc.cluster.local:9000
             - name: MINIO_ACCESS_KEY
@@ -96,6 +118,16 @@ spec:
                   key: ADMIN_PASSWORD
             - name: ZIPKIN_ENDPOINT
               value: http://zipkin.monitoring.svc.cluster.local:9411/api/v2/spans
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: toy-rental-log-level
+                  key: LOG_LEVEL
+            - name: JAVA_TOOL_OPTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: toy-rental-jvm-opts
+                  key: JAVA_TOOL_OPTIONS
           resources:
             requests:
               cpu: 250m

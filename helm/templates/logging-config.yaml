@@ -1,0 +1,14 @@
+# Shared across all 3 app services (unlike toy-service-config/booking-service-config,
+# which are per-service Kafka concurrency knobs) — one toggle to flip log verbosity for
+# the whole stack at once: DEBUG for sanity checks, ERROR to cut logging overhead during
+# a load test. Each Deployment reads this via LOG_LEVEL, applied to the com.toyrental
+# package only (framework loggers stay at their static level in application.yml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: toy-rental-log-level
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "toy-rental.labels" (dict "name" "toy-rental-log-level" "root" $) | nindent 4 }}
+data:
+  LOG_LEVEL: {{ .Values.logging.level | quote }}

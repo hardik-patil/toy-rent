@@ -1,0 +1,18 @@
+# Shared across all 3 app services, same pattern as logging-config.yaml — one toggle
+# for JVM flags across the whole stack. JAVA_TOOL_OPTIONS is read automatically by the
+# `java` launcher at startup (no Dockerfile/entrypoint change needed); the JVM prints
+# "Picked up JAVA_TOOL_OPTIONS: ..." to stderr when it applies them, useful to confirm
+# a change actually took effect after a rollout restart.
+#
+# Empty by default — deliberately. Per CLAUDE.md's "Performance Engineering — Bottlenecks
+# to Find" (#6, JVM heap), the fix (e.g. -Xmx512m -XX:+UseG1GC) is meant to be applied
+# after your own JMeter/JFR analysis proves the need, not pre-applied here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: toy-rental-jvm-opts
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "toy-rental.labels" (dict "name" "toy-rental-jvm-opts" "root" $) | nindent 4 }}
+data:
+  JAVA_TOOL_OPTIONS: {{ .Values.jvmOpts | quote }}

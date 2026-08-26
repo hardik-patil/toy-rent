@@ -22,6 +22,12 @@ spring:
     locations: classpath:db/migration
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    listener:
+      # Applies to every @KafkaListener in this service (one shared container factory,
+      # see KafkaConsumerConfig) — all three consumer groups here (notification-cg,
+      # booking-internal-cg, report-cg) share this same concurrency, not independently
+      # tunable per group without splitting them onto separate container factories.
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:1}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -113,5 +119,5 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} correlationId=%X{correlationId} traceId=%X{traceId} spanId=%X{spanId} - %msg%n"
   level:
-    com.toyrental: DEBUG
+    com.toyrental: ${LOG_LEVEL:DEBUG}
     org.springframework.kafka: INFO

@@ -13,6 +13,17 @@ stringData:
   MINIO_SECRET_KEY: {{ .Values.secrets.minio.secretKey | quote }}
 
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: toy-service-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "toy-rental.labels" (dict "name" "toy-service" "root" $) | nindent 4 }}
+data:
+  KAFKA_LISTENER_CONCURRENCY: {{ .Values.toyService.kafka.listenerConcurrency | quote }}
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -57,6 +68,11 @@ spec:
                   key: COUCHBASE_PASSWORD
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: kafka.{{ .Values.infraNamespace }}.svc.cluster.local:9092
+            - name: KAFKA_LISTENER_CONCURRENCY
+              valueFrom:
+                configMapKeyRef:
+                  name: toy-service-config
+                  key: KAFKA_LISTENER_CONCURRENCY
             - name: BOOKING_SERVICE_JWK_SET_URI
               value: http://booking-service.{{ .Values.namespace }}.svc.cluster.local:8082/oauth2/jwks
             - name: MINIO_ENDPOINT
@@ -73,6 +89,16 @@ spec:
                   key: MINIO_SECRET_KEY
             - name: ZIPKIN_ENDPOINT
               value: http://zipkin.{{ .Values.monitoringNamespace }}.svc.cluster.local:9411/api/v2/spans
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: toy-rental-log-level
+                  key: LOG_LEVEL
+            - name: JAVA_TOOL_OPTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: toy-rental-jvm-opts
+                  key: JAVA_TOOL_OPTIONS
           resources:
             {{- toYaml .Values.toyService.resources | nindent 12 }}
           livenessProbe:

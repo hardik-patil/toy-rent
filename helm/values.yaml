@@ -34,6 +34,11 @@ toyService:
   replicas: 2
   image:
     repository: toyrental/toy-service
+  kafka:
+    # Applies to every @KafkaListener in this service (one shared container factory) —
+    # there's only one consumer group here (toy-service-cg), so this is also
+    # effectively that group's concurrency.
+    listenerConcurrency: 1
   resources:
     requests:
       cpu: 250m
@@ -51,6 +56,11 @@ bookingService:
   replicas: 2
   image:
     repository: toyrental/booking-service
+  kafka:
+    # Applies to every @KafkaListener in this service (one shared container factory) —
+    # all three consumer groups here (notification-cg, booking-internal-cg, report-cg)
+    # share this same concurrency value, not independently tunable per group.
+    listenerConcurrency: 1
   resources:
     requests:
       cpu: 250m
@@ -68,6 +78,15 @@ bookingService:
 # dev node (single-node Docker Desktop k8s, no headroom), JVM startup can take
 # 2+ minutes instead of the normal ~20s, and the tighter delays were killing
 # pods (exit 137) mid-startup before Tomcat ever bound the port.
+# Empty by default — see jvm-opts-config.yaml's comment. Set via --set jvmOpts="..."
+# or here once you've got real values from your own JMeter/JFR analysis.
+jvmOpts: ""
+
+logging:
+  # Shared across all 3 app services — DEBUG for sanity checks, ERROR during a load
+  # test. Backs the toy-rental-log-level ConfigMap; see LOG_LEVEL in each Deployment.
+  level: DEBUG
+
 probes:
   liveness:
     path: /actuator/health/liveness

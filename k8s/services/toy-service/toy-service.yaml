@@ -19,6 +19,23 @@ stringData:
   MINIO_SECRET_KEY: minioadmin
 
 ---
+# Applies to every @KafkaListener in this service (one shared container factory) —
+# there's only one consumer group here (toy-service-cg), so this is also effectively
+# that group's concurrency.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: toy-service-config
+  namespace: toy-rental
+  labels:
+    app.kubernetes.io/name: toy-service
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+data:
+  KAFKA_LISTENER_CONCURRENCY: "1"
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -69,6 +86,11 @@ spec:
                   key: COUCHBASE_PASSWORD
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: kafka.infra.svc.cluster.local:9092
+            - name: KAFKA_LISTENER_CONCURRENCY
+              valueFrom:
+                configMapKeyRef:
+                  name: toy-service-config
+                  key: KAFKA_LISTENER_CONCURRENCY
             - name: BOOKING_SERVICE_JWK_SET_URI
               value: http://booking-service.toy-rental.svc.cluster.local:8082/oauth2/jwks
             - name: MINIO_ENDPOINT
@@ -89,6 +111,16 @@ spec:
                   key: MINIO_SECRET_KEY
             - name: ZIPKIN_ENDPOINT
               value: http://zipkin.monitoring.svc.cluster.local:9411/api/v2/spans
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: toy-rental-log-level
+                  key: LOG_LEVEL
+            - name: JAVA_TOOL_OPTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: toy-rental-jvm-opts
+                  key: JAVA_TOOL_OPTIONS
           resources:
             requests:
               cpu: 250m

@@ -1,0 +1,17 @@
+# Shared across all 3 app services (unlike toy-service-config/booking-service-config,
+# which are per-service Kafka concurrency knobs) — one toggle to flip log verbosity for
+# the whole stack at once: DEBUG for sanity checks, ERROR to cut logging overhead during
+# a load test. Each Deployment reads this via LOG_LEVEL, applied to the com.toyrental
+# package only (framework loggers stay at their static level in application.yml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: toy-rental-log-level
+  namespace: toy-rental
+  labels:
+    app.kubernetes.io/name: toy-rental-log-level
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+data:
+  LOG_LEVEL: "DEBUG"

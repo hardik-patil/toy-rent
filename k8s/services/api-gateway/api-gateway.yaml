@@ -38,6 +38,16 @@ spec:
               value: http://booking-service.toy-rental.svc.cluster.local:8082
             - name: KEYCLOAK_ISSUER_URI
               value: http://keycloak.infra.svc.cluster.local:8080/realms/toyrental
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: toy-rental-log-level
+                  key: LOG_LEVEL
+            - name: JAVA_TOOL_OPTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: toy-rental-jvm-opts
+                  key: JAVA_TOOL_OPTIONS
           resources:
             requests:
               cpu: 200m
