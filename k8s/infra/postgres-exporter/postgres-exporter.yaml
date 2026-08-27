@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-exporter-secret
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: postgres-exporter
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+type: Opaque
+stringData:
+  # Connects as the postgres superuser (postgres-secret's POSTGRES_PASSWORD, duplicated
+  # here since DATA_SOURCE_NAME needs it embedded in a single URI string — Kubernetes
+  # Secrets can't interpolate another Secret's key into one value) against the default
+  # "postgres" database. pg_stat_database and friends report on every database in the
+  # cluster (toydb, bookingdb) regardless of which one the connection targets, so this
+  # sees both services' DBs despite CLAUDE.md's "no cross-service DB access" rule being
+  # about application code, not this read-only ops/monitoring exporter.
+  DATA_SOURCE_NAME: "postgresql://postgres:postgres@postgres.infra.svc.cluster.local:5432/postgres?sslmode=disable"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: postgres-exporter
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres-exporter
+        app.kubernetes.io/version: "1.0.0"
+        app.kubernetes.io/part-of: toy-rental
+        app.kubernetes.io/managed-by: kubectl
+    spec:
+      containers:
+        - name: postgres-exporter
+          image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+          env:
+            - name: DATA_SOURCE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-exporter-secret
+                  key: DATA_SOURCE_NAME
+          ports:
+            - containerPort: 9187
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 9187
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: 9187
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter
+  namespace: infra
+  labels:
+    app.kubernetes.io/name: postgres-exporter
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  selector:
+    app.kubernetes.io/name: postgres-exporter
+  ports:
+    - port: 9187
+      targetPort: 9187

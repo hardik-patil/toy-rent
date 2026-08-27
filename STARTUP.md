@@ -28,8 +28,14 @@ kubectl config current-context
 
 ```bash
 kubectl scale statefulset -n infra couchbase kafka minio postgres --replicas=1
-kubectl scale deployment  -n infra keycloak redis wiremock --replicas=1
+kubectl scale deployment  -n infra keycloak redis wiremock postgres-exporter kafka-lag-exporter --replicas=1
 ```
+
+`postgres-exporter` and `kafka-lag-exporter` are Prometheus scrape targets for
+Postgres/Kafka server-side metrics (added alongside Couchbase's native `/metrics`, which
+needs no separate pod — see `k8s/infra/prometheus/prometheus.yaml`'s `couchbase` job).
+Scaling them up before Postgres/Kafka are ready is harmless — both retry until their
+target is reachable (`kafka-lag-exporter` re-polls every 30s).
 
 Wait for all of these to reach `1/1 Running` before moving on — Couchbase in particular can
 take several minutes on this node. Poll with:
@@ -106,6 +112,21 @@ username `admin`, password `admin123`.
 
 Grafana: `http://localhost:3000` — username `admin`, password `admin`.
 Prometheus: `http://localhost:9090`.
+
+Confirm all 6 scrape targets are up (api-gateway, toy-service, booking-service, couchbase,
+postgres-exporter, kafka-lag-exporter):
+```bash
+curl -s "http://localhost:9090/api/v1/targets" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+for t in d['data']['activeTargets']:
+    print(t['labels'].get('job'), '-', t['health'])
+"
+```
+If `couchbase`/`postgres-exporter`/`kafka-lag-exporter` show `down` with a connection
+timeout (not a 401/config error), it's almost always the `monitoring` → `infra`
+NetworkPolicy exception in `k8s/network-policy.yaml` not being applied — reapply it with
+`kubectl apply -f k8s/network-policy.yaml`.
 
 ---
 

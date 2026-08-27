@@ -119,9 +119,9 @@ spec:
 # namespace `from` entry below, those Jobs hung on every connection attempt,
 # indistinguishable from Couchbase itself still starting up, which is what made
 # this take so long to notice during the couchbase startup investigation).
-# Never reachable from outside the cluster or from monitoring/kube-system. Ports
-# cover every infra service's client port (Postgres 5432, Couchbase 8091-8096/
-# 11210, Kafka 9092, Redis 6379, MinIO 9000, Keycloak 8080, WireMock 9090).
+# Never reachable from outside the cluster or from kube-system. Ports cover every
+# infra service's client port (Postgres 5432, Couchbase 8091-8096/11210, Kafka
+# 9092, Redis 6379, MinIO 9000, Keycloak 8080, WireMock 9090).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -169,3 +169,20 @@ spec:
           port: 8080
         - protocol: TCP
           port: 9090
+    # Prometheus (monitoring namespace) scraping metrics endpoints only — Couchbase's
+    # native /metrics (8091, shared with its normal REST/UI port — no separate metrics
+    # port exists to scope more tightly), postgres-exporter (9187), kafka-lag-exporter
+    # (8000). Deliberately NOT the broader client ports above (5432, 9092, 6379, etc.)
+    # — monitoring has no business opening a DB/broker client connection, only reading
+    # metrics.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8091
+        - protocol: TCP
+          port: 9187
+        - protocol: TCP
+          port: 8000

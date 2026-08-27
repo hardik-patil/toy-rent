@@ -32,6 +32,26 @@ data:
         metrics_path: /actuator/prometheus
         static_configs:
           - targets: ["booking-service.toy-rental.svc.cluster.local:8082"]
+
+      - job_name: couchbase
+        # Couchbase 7.x exposes Prometheus-format metrics natively — no exporter needed.
+        # It sends no Content-Type header on /metrics though, which Prometheus 3.x's
+        # stricter content negotiation rejects outright without this fallback.
+        metrics_path: /metrics
+        fallback_scrape_protocol: PrometheusText0.0.4
+        basic_auth:
+          username: Administrator
+          password: password
+        static_configs:
+          - targets: ["couchbase.infra.svc.cluster.local:8091"]
+
+      - job_name: postgres-exporter
+        static_configs:
+          - targets: ["postgres-exporter.infra.svc.cluster.local:9187"]
+
+      - job_name: kafka-lag-exporter
+        static_configs:
+          - targets: ["kafka-lag-exporter.infra.svc.cluster.local:8000"]
   alerts.yml: |
     groups:
       - name: toyrental-availability
