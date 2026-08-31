@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
         - name: api-gateway
-          image: toyrental/api-gateway:1.0.5
+          image: toyrental/api-gateway:1.0.7
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -38,6 +38,8 @@ spec:
               value: http://booking-service.toy-rental.svc.cluster.local:8082
             - name: KEYCLOAK_ISSUER_URI
               value: http://keycloak.infra.svc.cluster.local:8080/realms/toyrental
+            - name: ZIPKIN_ENDPOINT
+              value: http://zipkin.monitoring.svc.cluster.local:9411/api/v2/spans
             - name: LOG_LEVEL
               valueFrom:
                 configMapKeyRef:
@@ -48,6 +50,21 @@ spec:
                 configMapKeyRef:
                   name: toy-rental-jvm-opts
                   key: JAVA_TOOL_OPTIONS
+            # New Relic APM agent. JDK_JAVA_OPTIONS is a separate JVM-native env var
+            # (read alongside JAVA_TOOL_OPTIONS above, not instead of it) so this stays
+            # independent of that ConfigMap's own documented purpose (JVM heap-tuning,
+            # deliberately left empty until proven necessary by JMeter/JFR analysis).
+            - name: JDK_JAVA_OPTIONS
+              value: -javaagent:/app/newrelic.jar
+            - name: NEW_RELIC_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: newrelic-secret
+                  key: NEW_RELIC_LICENSE_KEY
+            - name: NEW_RELIC_APP_NAME
+              value: api-gateway
+            - name: NEW_RELIC_LOG_FILE_PATH
+              value: STDOUT
           resources:
             requests:
               cpu: 200m

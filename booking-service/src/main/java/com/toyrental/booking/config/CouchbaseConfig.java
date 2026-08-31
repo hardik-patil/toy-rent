@@ -5,9 +5,11 @@ import com.couchbase.client.java.Cluster;
 import com.couchbase.client.java.ClusterOptions;
 import com.couchbase.client.java.codec.JacksonJsonSerializer;
 import com.couchbase.client.java.env.ClusterEnvironment;
+import com.couchbase.client.tracing.opentelemetry.OpenTelemetryRequestTracer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import io.opentelemetry.api.OpenTelemetry;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -28,13 +30,14 @@ public class CouchbaseConfig {
      * DecodingFailureException bug (see toy-service's CouchbaseConfig for the full story).
      */
     @Bean(destroyMethod = "shutdown")
-    public ClusterEnvironment couchbaseClusterEnvironment() {
+    public ClusterEnvironment couchbaseClusterEnvironment(OpenTelemetry openTelemetry) {
         ObjectMapper couchbaseObjectMapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
         return ClusterEnvironment.builder()
                 .jsonSerializer(JacksonJsonSerializer.create(couchbaseObjectMapper))
+                .requestTracer(OpenTelemetryRequestTracer.wrap(openTelemetry))
                 .build();
     }
 

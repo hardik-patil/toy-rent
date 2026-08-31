@@ -28,6 +28,12 @@ spring:
       # booking-internal-cg, report-cg) share this same concurrency, not independently
       # tunable per group without splitting them onto separate container factories.
       concurrency: ${KAFKA_LISTENER_CONCURRENCY:1}
+      # Continues the producer's trace into these consumers' spans instead of starting a
+      # fresh, disconnected trace — otherwise a booking-confirmation trace stops dead at
+      # the Kafka boundary in Zipkin.
+      observation-enabled: true
+    template:
+      observation-enabled: true
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer

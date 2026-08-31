@@ -5,6 +5,7 @@ FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
 RUN useradd --system --uid 1000 toyrental
 COPY target/toy-service-0.0.1-SNAPSHOT.jar app.jar
+COPY newrelic.jar newrelic.jar
 USER toyrental
 EXPOSE 8081
 ENTRYPOINT ["java", "-jar", "app.jar"]

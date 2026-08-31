@@ -1,5 +1,8 @@
 HELP.md
 target/
+# Downloaded third-party APM agent, not source — fetched fresh at build time, same
+# reasoning as the .mvn wrapper jar exclusion below.
+newrelic.jar
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/

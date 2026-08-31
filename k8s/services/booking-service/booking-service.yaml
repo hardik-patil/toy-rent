@@ -60,7 +60,7 @@ spec:
     spec:
       containers:
         - name: booking-service
-          image: toyrental/booking-service:1.0.6
+          image: toyrental/booking-service:1.0.10
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8082
@@ -128,6 +128,21 @@ spec:
                 configMapKeyRef:
                   name: toy-rental-jvm-opts
                   key: JAVA_TOOL_OPTIONS
+            # New Relic APM agent. JDK_JAVA_OPTIONS is a separate JVM-native env var
+            # (read alongside JAVA_TOOL_OPTIONS above, not instead of it) so this stays
+            # independent of that ConfigMap's own documented purpose (JVM heap-tuning,
+            # deliberately left empty until proven necessary by JMeter/JFR analysis).
+            - name: JDK_JAVA_OPTIONS
+              value: -javaagent:/app/newrelic.jar
+            - name: NEW_RELIC_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: newrelic-secret
+                  key: NEW_RELIC_LICENSE_KEY
+            - name: NEW_RELIC_APP_NAME
+              value: booking-service
+            - name: NEW_RELIC_LOG_FILE_PATH
+              value: STDOUT
           resources:
             requests:
               cpu: 250m

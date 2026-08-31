@@ -52,6 +52,39 @@ data:
       - job_name: kafka-lag-exporter
         static_configs:
           - targets: ["kafka-lag-exporter.infra.svc.cluster.local:8000"]
+
+      # Container-level CPU/memory per pod (cAdvisor, embedded in kubelet) and PVC
+      # usage (kubelet_volume_stats_*, also served by kubelet). Single-node cluster,
+      # so the node's kubelet is hardcoded here rather than via kubernetes_sd_configs —
+      # revisit with service discovery if this ever becomes a multi-node cluster.
+      # Requires the prometheus ServiceAccount + ClusterRole granting get on
+      # nodes/proxy (see the RBAC objects below in this file).
+      - job_name: cadvisor
+        # cAdvisor's per-container stats computation is CPU-heavy on this
+        # resource-constrained node — scraped far less often than everything else
+        # (default 15s) to avoid adding to the node's own load.
+        scrape_interval: 60s
+        scrape_timeout: 30s
+        scheme: https
+        tls_config:
+          insecure_skip_verify: true
+        authorization:
+          credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        metrics_path: /metrics/cadvisor
+        static_configs:
+          - targets: ["172.20.0.4:10250"]
+
+      - job_name: kubelet
+        scrape_interval: 60s
+        scrape_timeout: 30s
+        scheme: https
+        tls_config:
+          insecure_skip_verify: true
+        authorization:
+          credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        metrics_path: /metrics
+        static_configs:
+          - targets: ["172.20.0.4:10250"]
   alerts.yml: |
     groups:
       - name: toyrental-availability
@@ -121,6 +154,75 @@ data:
               description: "Sustained high heap usage — check for a leak or, if under soak test, the intentional default-Xmx bottleneck Sprint 7 is meant to find."
 
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-node-metrics
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+rules:
+  # kubelet authorizes every incoming request (direct or via the apiserver proxy)
+  # against nodes/proxy, regardless of which path (/metrics, /metrics/cadvisor) is
+  # actually being hit.
+  - apiGroups: [""]
+    resources: ["nodes/proxy", "nodes/metrics", "nodes/stats"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-node-metrics
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+roleRef:
+  kind: ClusterRole
+  name: prometheus-node-metrics
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: toy-rental
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -133,6 +235,8 @@ metadata:
     app.kubernetes.io/managed-by: kubectl
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: prometheus
@@ -144,6 +248,7 @@ spec:
         app.kubernetes.io/part-of: toy-rental
         app.kubernetes.io/managed-by: kubectl
     spec:
+      serviceAccountName: prometheus
       containers:
         - name: prometheus
           image: prom/prometheus:latest
@@ -160,18 +265,21 @@ spec:
               port: 9090
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /-/healthy
               port: 9090
             initialDelaySeconds: 20
             periodSeconds: 15
+            timeoutSeconds: 5
       volumes:
         - name: config
           configMap:
             name: prometheus-config
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: prometheus-data
 
 ---
 apiVersion: v1

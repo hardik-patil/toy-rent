@@ -35,12 +35,14 @@ spec:
               port: 9411
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /health
               port: 9411
             initialDelaySeconds: 20
             periodSeconds: 15
+            timeoutSeconds: 5
 
 ---
 apiVersion: v1

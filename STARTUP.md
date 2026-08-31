@@ -1,8 +1,8 @@
 # ToyRental Platform — Startup Runbook
 
 How to bring the whole stack back up from a stopped state (everything scaled to 0,
-port-forwards and frontend dev server killed — see the shutdown this mirrors). Data is
-safe across a stop/start cycle: Postgres, Couchbase, MinIO, and Kafka all use real
+port-forwards and frontend dev server killed — see `SHUTDOWN.md`, which this mirrors).
+Data is safe across a stop/start cycle: Postgres, Couchbase, MinIO, and Kafka all use real
 PersistentVolumeClaims, not ephemeral storage, so nothing here recreates or seeds data.
 
 Run everything from the repo root (`/Users/hardikpatil/Documents/toy-rent`) unless noted.
@@ -60,11 +60,30 @@ kubectl get pods -n monitoring -w
 
 Only after infra is fully `1/1 Running` — these depend on Postgres/Couchbase/Kafka being
 reachable at startup (Flyway migrations, Couchbase bucket connections, Kafka consumer group
-join):
+join).
+
+**Use `kubectl apply`, not `kubectl scale`.** `SHUTDOWN.md` deletes these three services'
+HorizontalPodAutoscalers as part of scaling down (a plain `--replicas=0` can't hold
+against a live CPU-based HPA with `minReplicas: 2` — it just gets scaled back up).
+`kubectl scale --replicas=1` here would bring the pods back but leave autoscaling gone
+until you separately noticed and fixed it. Re-applying each manifest restores the
+Deployment *and* recreates its HPA in one step:
 ```bash
-kubectl scale deployment -n toy-rental api-gateway booking-service toy-service --replicas=1
+kubectl apply -f k8s/services/toy-service/toy-service.yaml
+kubectl apply -f k8s/services/booking-service/booking-service.yaml
+kubectl apply -f k8s/services/api-gateway/api-gateway.yaml
 kubectl get pods -n toy-rental -w
 ```
+This also means each apply already includes 2 replicas (the manifests' own `replicas: 2`,
+not 1) — no separate scale-up step needed afterward.
+
+Apply one at a time and let each reach `1/1 Ready` before the next, watching
+`kubectl top node` between them — three concurrent JVM cold starts have spiked this
+node to 90%+ CPU before and triggered a real incident (Postgres's liveness probe timing
+out under the load, getting killed, and every app losing its DB connection at once —
+see `CLAUDE.md`'s Known Bugs table). Don't run all three applies back to back without
+checking in between, and never combine this with a `kubectl rollout restart --all` on
+top of an already-in-progress rollout.
 
 Startup can take 1–3 minutes per pod under load on this node — the liveness/readiness probe
 delays were already tuned (150s/120s) specifically for this, so don't intervene unless a pod
@@ -81,6 +100,7 @@ kubectl port-forward -n toy-rental svc/booking-service 8082:8082 &
 kubectl port-forward -n infra svc/minio 9000:9000 &
 kubectl port-forward -n monitoring svc/prometheus 9090:9090 &
 kubectl port-forward -n monitoring svc/grafana 3000:3000 &
+kubectl port-forward -n monitoring svc/zipkin 9411:9411 &
 ```
 (api-gateway is not port-forwarded — its Keycloak JWT validation was never wired up, so the
 frontend and all testing bypass it entirely and talk to toy-service/booking-service directly.)
@@ -128,6 +148,49 @@ timeout (not a 401/config error), it's almost always the `monitoring` → `infra
 NetworkPolicy exception in `k8s/network-policy.yaml` not being applied — reapply it with
 `kubectl apply -f k8s/network-policy.yaml`.
 
+Confirm Zipkin has all three services (distributed tracing, independent of New Relic —
+see below):
+```bash
+curl -s http://localhost:9411/api/v2/services
+# should print: ["api-gateway","booking-service","toy-service"]
+```
+
+Confirm each app's New Relic agent actually connected (it's baked into the image +
+env vars already, no separate startup step needed — this just verifies it worked):
+```bash
+kubectl logs -n toy-rental -l app.kubernetes.io/name=toy-service --tail=200 | grep -i "connected to collector\|Invalid license key"
+```
+Look for `Agent ... connected to collector.newrelic.com:443`. If you see `Invalid
+license key` instead, the agent still runs (failures here are non-fatal to the app) but
+won't report data — and it retries fast enough to be a real CPU cost, not just a
+harmless log line, so don't ignore it. See `NEW_RELIC_LICENSE_KEY` in
+`k8s/services/newrelic-secret.yaml`'s `secretKeyRef` — the real key lives only in the
+live cluster Secret, never in a file in this repo; re-patch it with
+`kubectl patch secret newrelic-secret -n toy-rental --type=merge -p '{"stringData":{"NEW_RELIC_LICENSE_KEY":"..."}}'`
+if it needs replacing.
+
+---
+
+## All URLs, once everything above is up
+
+| What | URL | Login |
+|---|---|---|
+| Frontend | `http://localhost:5173` (Vite may pick a different port — check its terminal output) | — |
+| Admin panel | `http://localhost:5173/admin/login` | `admin` / `admin123` |
+| toy-service API | `http://localhost:8081` (e.g. `/api/v1/toys`) | — |
+| toy-service health | `http://localhost:8081/actuator/health` | — |
+| booking-service API | `http://localhost:8082` | — |
+| booking-service health | `http://localhost:8082/actuator/health` | — |
+| MinIO | `http://localhost:9000` | `minioadmin` / `minioadmin` |
+| Prometheus | `http://localhost:9090` | — |
+| Grafana | `http://localhost:3000` | `admin` / `admin` |
+| Zipkin | `http://localhost:9411/zipkin/` | — |
+| New Relic APM | `https://one.newrelic.com` → APM & Services → `toy-service` / `booking-service` / `api-gateway` | your New Relic account login |
+
+`api-gateway` has no local URL — it's intentionally not port-forwarded (see step 4's
+note: its Keycloak JWT validation was never wired up, so nothing actually routes through
+it in this dev setup).
+
 ---
 
 ## Dynatrace Operator (one-time setup)
@@ -137,14 +200,34 @@ the shutdown flow this runbook mirrors, so this only needs doing once per cluste
 every startup.
 
 ```bash
-# Pin to a specific released version — check
-# https://github.com/Dynatrace/dynatrace-operator/releases for the current one and
-# update both this command and dynakube.yaml's apiVersion to match:
-kubectl apply -f https://github.com/Dynatrace/dynatrace-operator/releases/download/vX.Y.Z/kubernetes.yaml
+# Pinned to v1.10.2 (https://github.com/Dynatrace/dynatrace-operator/releases/tag/v1.10.2).
+# Uses the non-CSI manifest deliberately — applicationMonitoring works without the CSI
+# driver, and skipping it avoids a permanent ~390Mi DaemonSet on a node with only 3
+# pods to instrument (same reasoning below for skipping the host-level OneAgent
+# DaemonSet). If you ever expand to cloudNativeFullStack or want cross-pod code-module
+# caching, that means switching to kubernetes-csi.yaml instead — not just a DynaKube
+# field flip, since useCSIDriver was removed as a toggle in current operator versions;
+# treat it as reinstalling this piece from scratch.
+#
+# k8s/namespace.yaml must be applied FIRST — kubernetes.yaml's Deployment/ServiceAccount/
+# Role/RoleBinding objects are hardcoded to `namespace: dynatrace` and fail if it
+# doesn't exist yet.
+kubectl apply -f k8s/namespace.yaml
+
+kubectl apply -f https://github.com/Dynatrace/dynatrace-operator/releases/download/v1.10.2/kubernetes.yaml
 kubectl -n dynatrace wait pod --for=condition=ready --selector=app.kubernetes.io/name=dynatrace-operator --timeout=300s
 
-kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/infra/dynatrace/
+
+# Restart one at a time (not a single combined command) — this node has a documented
+# history of freezing under concentrated load; spreading the 3x init-container-copy +
+# JVM-cold-start work avoids stacking it. Watch `kubectl top node` between each.
+kubectl rollout restart deployment -n toy-rental api-gateway
+kubectl rollout status deployment -n toy-rental api-gateway --timeout=180s
+kubectl rollout restart deployment -n toy-rental toy-service
+kubectl rollout status deployment -n toy-rental toy-service --timeout=180s
+kubectl rollout restart deployment -n toy-rental booking-service
+kubectl rollout status deployment -n toy-rental booking-service --timeout=180s
 ```
 
 `k8s/infra/dynatrace/secret.yaml` ships with placeholder tokens — replace `apiToken`/
@@ -153,7 +236,7 @@ kubectl apply -f k8s/infra/dynatrace/
 tenant. Until then, `kubectl get dynakube -n dynatrace` reports a connectivity/auth error
 in status — expected, and it doesn't block pod injection itself. See `CLAUDE.md`'s
 Kubernetes section for what's monitored (toy-rental namespace, applicationMonitoring
-mode only).
+mode only, apiVersion v1beta6).
 
 ---
 

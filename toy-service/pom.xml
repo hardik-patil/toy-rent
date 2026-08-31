@@ -58,11 +58,41 @@
         </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-tracing-bridge-brave</artifactId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+        <!-- Spring Boot's own Micrometer Tracing auto-config does NOT instrument JDBC/JPA
+             calls on its own — this proxies the DataSource to emit Observations (spans)
+             per query, closing the gap confirmed live: without it, every trace stopped at
+             Spring Security filter-chain internals plus the bare HTTP span, no DB span at
+             all, even with the tracer bridge correctly wired. -->
+        <dependency>
+            <groupId>net.ttddyy.observation</groupId>
+            <artifactId>datasource-micrometer-spring-boot</artifactId>
+            <version>1.4.1</version>
         </dependency>
         <dependency>
-            <groupId>io.zipkin.reporter2</groupId>
-            <artifactId>zipkin-reporter-brave</artifactId>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-zipkin</artifactId>
+        </dependency>
+        <!-- Couchbase's SDK-native span emission only bridges to OpenTelemetry, not Brave —
+             this is why the tracer bridge above is OTel rather than this project's original
+             Brave bridge. Wired into ClusterEnvironment in CouchbaseConfig. -->
+        <dependency>
+            <groupId>com.couchbase.client</groupId>
+            <artifactId>tracing-opentelemetry</artifactId>
+            <version>1.2.4</version>
+            <!-- 1.2.4 transitively pulls core-io 2.4.4, which conflicts with (and silently
+                 wins dependency mediation over) the core-io version java-client 3.6.0 above
+                 actually needs — caused a NoClassDefFoundError on CoreSearchOptions at
+                 runtime, found live. Exclude it so java-client's own transitive core-io
+                 version resolves instead; tracing-opentelemetry itself is version-tolerant
+                 of the core-io API it calls into. -->
+            <exclusions>
+                <exclusion>
+                    <groupId>com.couchbase.client</groupId>
+                    <artifactId>core-io</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.springframework.kafka</groupId>

@@ -31,6 +31,12 @@ spring:
       # see KafkaConsumerConfig) — there's only one consumer group here (toy-service-cg),
       # so this is also effectively that group's concurrency.
       concurrency: ${KAFKA_LISTENER_CONCURRENCY:1}
+      # Continues the producer's trace into this consumer's span instead of starting a
+      # fresh, disconnected trace — otherwise a booking-confirmation trace stops dead at
+      # the Kafka boundary in Zipkin.
+      observation-enabled: true
+    template:
+      observation-enabled: true
     consumer:
       group-id: toy-service-cg
       auto-offset-reset: earliest
