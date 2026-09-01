@@ -18,6 +18,20 @@ is left retrying against a target that just disappeared mid-request.
 
 These aren't Kubernetes resources — `kubectl scale` doesn't touch them.
 
+**On Windows/Git Bash, `pkill -f` doesn't reliably reach these** — `kubectl.exe` and
+`node.exe` are native Windows processes, not part of Git Bash's own MSYS process tree, so
+`pkill -f "kubectl port-forward"` / `pkill -f "npm run dev"` can silently match nothing.
+Use `taskkill` instead (confirmed working 2026-09-02):
+```bash
+taskkill //IM kubectl.exe //F
+taskkill //IM node.exe //F
+```
+This kills *every* `kubectl.exe`/`node.exe` process, not just this project's — fine given
+this is a single-project dev machine, but check `tasklist //FI "IMAGENAME eq kubectl.exe"`
+/ `tasklist //FI "IMAGENAME eq node.exe"` first if you have unrelated kubectl/node work
+running elsewhere you don't want killed.
+
+On macOS/Linux, the original `pkill -f` commands work as documented:
 ```bash
 pkill -f "kubectl port-forward"
 pkill -f "npm run dev"    # or Ctrl+C in the frontend's terminal tab
@@ -82,6 +96,13 @@ still show as `Completed` — that's fine, they're one-shot Jobs, not scaled res
 kubectl top node
 ```
 CPU/memory should drop close to idle within a minute or two of the last scale-down.
+**This errors with `Metrics API not available`** on this cluster — `metrics-server` has
+never been installed here (see `CLAUDE.md`'s Known Bugs table). Use this instead, which
+works off the underlying Docker container directly and needs no cluster-side component:
+```bash
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
+```
+(Node-wide only, not per-pod — fine for confirming things actually went idle.)
 
 ---
 
