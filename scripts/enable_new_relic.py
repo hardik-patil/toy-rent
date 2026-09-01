@@ -24,6 +24,7 @@ See scripts/README.md for the full how-to-run guide.
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -33,6 +34,19 @@ SECRET_NAME = "newrelic-secret"
 SECRET_KEY = "NEW_RELIC_LICENSE_KEY"
 DEPLOYMENTS = ["toy-service", "booking-service", "api-gateway"]
 PLACEHOLDER = "REPLACE_WITH_REAL_NEW_RELIC_LICENSE_KEY"
+
+# Manifest path per deployment, relative to the repo root (this script assumes it's run
+# from there, matching scripts/README.md's documented usage). Re-applying the manifest —
+# not `kubectl set env deployment/x JDK_JAVA_OPTIONS-` — is the correct way to restore
+# JDK_JAVA_OPTIONS to its real -javaagent value: plain Kubernetes has no override/base
+# layer for `kubectl set env` to "fall back" to, so the trailing-dash form just deletes the
+# env var outright instead of restoring it. This bit us once already (2026-09-01's Known
+# Bugs entry in CLAUDE.md) — the agent silently never loaded after using that approach.
+MANIFEST_PATHS = {
+    "toy-service": "k8s/services/toy-service/toy-service.yaml",
+    "booking-service": "k8s/services/booking-service/booking-service.yaml",
+    "api-gateway": "k8s/services/api-gateway/api-gateway.yaml",
+}
 
 
 def run(cmd, **kwargs):
@@ -82,14 +96,35 @@ def patch_secret(namespace: str, key: str) -> None:
 
 def reenable_agent(namespace: str, deployment: str, wait_for_rollout: bool) -> None:
     print(f"\n== Re-enabling agent on deployment '{deployment}' ==")
-    # Trailing "-" (no "=value") is kubectl set env's syntax for removing a
-    # previously-set env var override, so the deployment falls back to the
-    # JDK_JAVA_OPTIONS already defined in its manifest.
-    run(["kubectl", "set", "env", f"deployment/{deployment}", "-n", namespace, "JDK_JAVA_OPTIONS-"])
+    manifest = MANIFEST_PATHS[deployment]
+    if not os.path.isfile(manifest):
+        sys.exit(
+            f"Error: {manifest!r} not found. Run this script from the repo root "
+            "(see scripts/README.md)."
+        )
+    # Re-apply the real manifest so JDK_JAVA_OPTIONS goes back to its actual
+    # -javaagent:/app/newrelic.jar value — see the MANIFEST_PATHS comment above for why
+    # this is NOT `kubectl set env deployment/x JDK_JAVA_OPTIONS-`.
+    run(["kubectl", "apply", "-f", manifest])
 
     if wait_for_rollout:
         print(f"-- waiting for deployment/{deployment} rollout to finish --")
-        run(["kubectl", "rollout", "status", f"deployment/{deployment}", "-n", namespace, "--timeout=300s"])
+        # Some rollouts on this project's node (see CLAUDE.md's Known Bugs table) take
+        # long enough — particularly api-gateway's pod termination — that 300s isn't
+        # always enough even when the rollout is actually succeeding. Treat a timeout as
+        # a warning, not a fatal error: check manually with `kubectl rollout status
+        # deployment/<name> -n <namespace>` if this prints a warning below.
+        result = subprocess.run(
+            ["kubectl", "rollout", "status", f"deployment/{deployment}", "-n", namespace, "--timeout=400s"]
+        )
+        if result.returncode != 0:
+            print(
+                f"WARNING: rollout status wait for '{deployment}' timed out or errored — "
+                "this doesn't necessarily mean it failed, the rollout may still complete "
+                "shortly after. Check manually: "
+                f"kubectl rollout status deployment/{deployment} -n {namespace}",
+                file=sys.stderr,
+            )
 
 
 def verify_connection(namespace: str, deployment: str) -> None:

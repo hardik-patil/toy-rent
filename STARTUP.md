@@ -11,16 +11,100 @@ Run everything from the repo root (`/Users/hardikpatil/Documents/toy-rent`) unle
 starts at once (documented in `CLAUDE.md`'s Known Bugs table). Bring infra up first and let
 it settle before starting the app services — don't scale everything up in one shot.
 
+**This whole doc assumes a *stopped* cluster** (namespaces and PVCs already exist, everything
+just scaled to 0). If `kubectl get ns` doesn't show `toy-rental`/`infra`/`monitoring` at all,
+you have a *fresh* cluster instead (first run, or Docker Desktop's Kubernetes was reset) —
+skip to **"Fresh cluster? Start here instead"** below before anything else, or the steps below
+will just fail against resources that don't exist yet.
+
 ---
 
 ## 0. Prerequisite
 
 Docker Desktop must be running with its Kubernetes cluster enabled, and `kubectl` must be
-pointed at the `desktop-control-plane` context:
+pointed at the right context:
 ```bash
 kubectl config current-context
-# should print: desktop-control-plane
+# should print: docker-desktop  (the node itself is named desktop-control-plane / desktop-worker
+# — that's the node name, not the context name; don't confuse the two)
 ```
+
+Check which situation you're in before going further:
+```bash
+kubectl get ns
+```
+If `toy-rental`, `infra`, and `monitoring` are all listed → this is a stopped cluster, continue
+with step 1 below. If none of them are listed → **jump to "Fresh cluster? Start here instead"**.
+
+---
+
+## Fresh cluster? Start here instead
+
+Everything in this section was real friction the first time this cluster was built from
+scratch (2026-09-01/02) — doing these up front turns a multi-hour debugging session into a
+straight run-through. Once done, the regular stop/start cycle (steps 1-6 below, `SHUTDOWN.md`)
+takes over as normal — this section is one-time-per-fresh-cluster, not part of the regular
+cycle.
+
+**1. Namespaces and network policy:**
+```bash
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/network-policy.yaml
+```
+
+**2. Build the three app images.** They're never pushed to a registry — each Dockerfile
+expects a pre-built jar plus `newrelic.jar` (gitignored, not in the repo) already sitting in
+the build context. A fresh checkout has neither. `JAVA_HOME` also isn't set by default in this
+shell — needed for `./mvnw`.
+```bash
+export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-17.0.20.8-hotspot"   # adjust if different
+
+# One-time: get newrelic.jar into all three service dirs
+curl -sSL -o /tmp/newrelic-java.zip https://download.newrelic.com/newrelic/java-agent/newrelic-agent/current/newrelic-java.zip
+cd /tmp && unzip -o -q newrelic-java.zip
+cd /c/Users/USER/Documents/toy-rent
+cp /tmp/newrelic/newrelic.jar toy-service/newrelic.jar
+cp /tmp/newrelic/newrelic.jar booking-service/newrelic.jar
+cp /tmp/newrelic/newrelic.jar api-gateway/newrelic.jar
+
+for svc in toy-service booking-service api-gateway; do
+  (cd $svc && ../$svc/mvnw package -DskipTests -q)
+done
+
+docker build -t toyrental/toy-service:1.0.10 toy-service
+docker build -t toyrental/booking-service:1.0.10 booking-service
+docker build -t toyrental/api-gateway:1.0.7 api-gateway
+```
+Docker Desktop's Kubernetes shares the host's Docker image store, so these are immediately
+visible to the cluster — no `kind load docker-image` or registry push needed (that would only
+apply to a standalone `kind` cluster, not this one).
+
+**3. Follow steps 1-3 below (infra, monitoring, app services) using `kubectl apply -f`, not
+`kubectl scale`** — nothing exists yet to scale. Apply `k8s/infra/*/*.yaml` one file at a time
+(each is fully self-contained: Secret/ConfigMap/StatefulSet-or-Deployment/Service/Job all in
+one manifest), then `k8s/infra/prometheus/prometheus.yaml` +
+`k8s/infra/grafana/grafana.yaml` + `k8s/infra/zipkin/zipkin.yaml`, then the three
+`k8s/services/*/*.yaml` **one at a time**, waiting for each to reach `1/1 Ready` before the
+next — see step 3's CPU-contention warning below, it applies even more here since nothing has
+had a chance to settle yet.
+
+**4. New Relic will fail to connect** (`k8s/services/newrelic-secret.yaml` ships a placeholder
+key) **and that's expected** — but don't ignore it either. See "New Relic" under step 6 below:
+an invalid key isn't just a quiet failure, the agent retries in a tight uncapped loop that's a
+real, significant CPU cost across every JVM simultaneously, and was the dominant cause of a
+liveness-probe crash-loop the first time this happened. Either get a real key before bringing
+services up (`scripts/enable_new_relic.py`), or expect to need `kubectl set env
+deployment/<name> -n toy-rental JDK_JAVA_OPTIONS=""` on each of the 3 app deployments if you
+see multiple services crash-looping together under CPU pressure.
+
+**5. Node.js.** If `node -v` / `npm -v` fail, Node.js isn't installed — `winget install
+OpenJS.NodeJS.LTS` (needs a real UAC prompt approved interactively, not scriptable). If it's
+freshly installed and still not found in an already-open terminal/session, that session's PATH
+is stale — find it directly (`C:\Program Files\nodejs\node.exe` by default) rather than waiting
+for PATH to catch up.
+
+Once through all of the above, the cluster is in the same state the rest of this doc assumes —
+continue with step 4 (port-forwards) onward as normal.
 
 ---
 
@@ -105,6 +189,22 @@ kubectl port-forward -n monitoring svc/zipkin 9411:9411 &
 (api-gateway is not port-forwarded — its Keycloak JWT validation was never wired up, so the
 frontend and all testing bypass it entirely and talk to toy-service/booking-service directly.)
 
+Two more you'll likely want, not in the original list but came up constantly during
+performance-testing/DB work — not started by default, add if you need them:
+```bash
+kubectl port-forward -n infra svc/postgres 5432:5432 &
+kubectl port-forward -n infra svc/couchbase 8091:8091 8093:8093 11210:11210 &
+```
+
+**Every one of these dies silently the moment its backing pod is recreated** — any
+`kubectl apply`/`kubectl set env`/`kubectl rollout restart`/HPA scale-up on that Deployment or
+StatefulSet kills the forward, even though it looks unrelated. This bit us repeatedly (Postgres,
+Couchbase, toy-service, booking-service, Prometheus — all hit at least once in one session) and
+each time looked like a fresh, unrelated failure (DBeaver hangs, curl connection refused, "no
+data in Prometheus") until traced back to the same cause. If something that was just working
+suddenly isn't, re-run its `kubectl port-forward` command before looking any further — check
+with `netstat -ano | grep 127.0.0.1:<port>` (should show `LISTENING`) or just try reconnecting.
+
 ---
 
 ## 5. Start the frontend
@@ -179,12 +279,16 @@ toy-rental JDK_JAVA_OPTIONS=""` on each — this is a live patch only, not commi
 manifests (which still have `JDK_JAVA_OPTIONS=-javaagent:/app/newrelic.jar`).
 
 Don't re-enable with the placeholder key still in place — it recreates the same
-crash-loop. Once a real `NEW_RELIC_LICENSE_KEY` is available:
+crash-loop. Once a real `NEW_RELIC_LICENSE_KEY` is available, use
+`scripts/enable_new_relic.py <key>` (see `scripts/README.md`), or manually:
 1. Patch the secret (command above).
-2. Drop the live override so each deployment falls back to the manifest's real value:
-   `kubectl set env deployment/<name> -n toy-rental JDK_JAVA_OPTIONS-` (note the trailing
-   `-`, no `=value` — that's `kubectl set env`'s syntax for removing an override), for
-   `toy-service`, `booking-service`, and `api-gateway`.
+2. Restore each deployment's `JDK_JAVA_OPTIONS` to the manifest's real value by
+   **re-`kubectl apply`-ing the manifest** — `kubectl apply -f
+   k8s/services/<toy-service|booking-service|api-gateway>/<same>.yaml` for each. **Do not**
+   use `kubectl set env deployment/<name> JDK_JAVA_OPTIONS-` (trailing dash) expecting it to
+   "fall back" to the manifest's value — plain Kubernetes has no such override/base layer,
+   that command just deletes the env var outright, and the agent silently never loads again
+   (this bit us once already: 2026-09-01's Known Bugs entry in `CLAUDE.md`).
 
 With a valid key the agent connects once and settles into lightweight periodic
 reporting — the retry-storm behavior above is specific to invalid credentials, not

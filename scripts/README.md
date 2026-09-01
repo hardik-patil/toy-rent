@@ -59,13 +59,23 @@ py scripts/enable_new_relic.py <YOUR_REAL_LICENSE_KEY>
 1. Validates the key isn't empty and isn't still the placeholder value.
 2. Patches the `newrelic-secret` Secret in the `toy-rental` namespace with your real key.
 3. For each of `toy-service`, `booking-service`, `api-gateway`:
-   - Runs `kubectl set env deployment/<name> -n toy-rental JDK_JAVA_OPTIONS-` to drop the
-     live override (this triggers a rolling restart of that deployment).
+   - Re-`kubectl apply`s that deployment's real manifest (`k8s/services/<name>/<name>.yaml`)
+     to restore `JDK_JAVA_OPTIONS` to its real `-javaagent:/app/newrelic.jar` value (this
+     triggers a rolling restart). **Not** `kubectl set env deployment/x JDK_JAVA_OPTIONS-` —
+     that trailing-dash form doesn't "fall back" to the manifest's value, it just deletes the
+     env var outright, since plain Kubernetes has no override/base layer for `set env` to
+     revert to. Learned this the hard way once already (see `CLAUDE.md`'s Known Bugs table,
+     2026-09-01 entry) — the agent silently never loaded after using that approach.
    - Waits for the rollout to finish before moving to the next deployment, so the three
      don't cold-start simultaneously (this cluster has a documented history of CPU
-     contention when too many JVMs start at once — see `STARTUP.md`).
+     contention when too many JVMs start at once — see `STARTUP.md`). A timeout here is a
+     warning, not fatal — this node has occasionally taken longer than 400s on a pod
+     termination even when the rollout succeeds; the script prints what to check manually.
 4. Tails each deployment's logs looking for `connected to collector` or
    `Invalid license key` and prints what it finds.
+
+Because it re-applies the actual manifest, run it from the repo root — it looks for
+`k8s/services/<name>/<name>.yaml` relative to the current directory.
 
 ### Options
 
