@@ -169,6 +169,30 @@ live cluster Secret, never in a file in this repo; re-patch it with
 `kubectl patch secret newrelic-secret -n toy-rental --type=merge -p '{"stringData":{"NEW_RELIC_LICENSE_KEY":"..."}}'`
 if it needs replacing.
 
+**Currently disabled live on the cluster (2026-09-01).** With the placeholder key still
+in place, the agent doesn't just fail quietly — it hammers `collector.newrelic.com` in a
+tight reconnect loop on every `LicenseException`, no backoff. Across all 3 JVMs
+simultaneously this was a major, sustained CPU cost (measured 350–550% node CPU) that
+was actively causing liveness-probe crash-loops during a full cluster bring-up. Disabled
+live via `kubectl set env deployment/<toy-service|booking-service|api-gateway> -n
+toy-rental JDK_JAVA_OPTIONS=""` on each — this is a live patch only, not committed to the
+manifests (which still have `JDK_JAVA_OPTIONS=-javaagent:/app/newrelic.jar`).
+
+Don't re-enable with the placeholder key still in place — it recreates the same
+crash-loop. Once a real `NEW_RELIC_LICENSE_KEY` is available:
+1. Patch the secret (command above).
+2. Drop the live override so each deployment falls back to the manifest's real value:
+   `kubectl set env deployment/<name> -n toy-rental JDK_JAVA_OPTIONS-` (note the trailing
+   `-`, no `=value` — that's `kubectl set env`'s syntax for removing an override), for
+   `toy-service`, `booking-service`, and `api-gateway`.
+
+With a valid key the agent connects once and settles into lightweight periodic
+reporting — the retry-storm behavior above is specific to invalid credentials, not
+normal agent overhead. At last measured steady state (infra + monitoring + both app
+service replicas, agent disabled) the node was at ~100% CPU of a 600% cap and
+11.4GB/23.5GB memory, so there's comfortable headroom to re-add normal (non-storming)
+agent overhead once the key is real.
+
 ---
 
 ## All URLs, once everything above is up
