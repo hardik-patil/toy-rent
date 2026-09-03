@@ -5,6 +5,84 @@ these talk to a live cluster via `kubectl`.
 
 ---
 
+## startup.py
+
+Brings the whole stack back up from a **stopped** cluster — the automated version of
+`STARTUP.md` steps 1–6. Stopped means the `toy-rental` / `infra` / `monitoring` namespaces
+and their PVCs still exist and everything is just scaled to 0 (the state `SHUTDOWN.md`
+leaves things in).
+
+### What it does, in order
+
+1. **Infra** — `kubectl scale` the `infra` StatefulSets (`postgres`, `kafka`, `minio`,
+   `couchbase`) and small Deployments (`keycloak`, `redis`, `wiremock`, `postgres-exporter`,
+   `kafka-lag-exporter`) back to 1, then waits for each via `kubectl rollout status`.
+   If infra doesn't come fully Ready it stops here rather than starting app services against
+   a half-up backend.
+2. **Monitoring** — `kubectl scale` `grafana` / `prometheus` / `zipkin` back to 1.
+3. **App services** — `kubectl apply` `toy-service`, then `booking-service`, then
+   `api-gateway`, **one at a time**, waiting for each rollout to finish and printing node
+   worker CPU (`docker stats`, since `metrics-server` isn't installed) in between. If CPU is
+   above ~400% it pauses 45s before the next one. `apply` rather than `scale` so each
+   Deployment's HPA — which `SHUTDOWN.md` deletes — is recreated from the same manifest.
+4. *(`--port-forward`)* starts the `STARTUP.md` step-4 port-forwards as **detached**
+   background processes, recording PIDs in `scripts/.portforward.pids` and per-forward logs
+   under `scripts/.portforward-logs/` (both git-ignored). Without the flag it just prints the
+   commands for you to run yourself.
+5. Prints the frontend start command (`cd frontend && npm run dev`) — a dev server isn't
+   this script's to own.
+6. *(`--verify`)* health-checks both services, lists Prometheus scrape-target health, lists
+   Zipkin services, and greps each app's New Relic agent log for `connected to collector` /
+   `Invalid license key`. The HTTP checks need the port-forwards up (via `--port-forward` or
+   your own).
+
+### Prerequisites
+
+- `kubectl` on PATH, pointed at the cluster (`kubectl config current-context` → `docker-desktop`).
+- A **stopped**, not fresh, cluster. If any of the three namespaces is missing the script
+  prints the fresh-cluster steps from `STARTUP.md` and exits — do those by hand first.
+- Python 3.7+, standard library only.
+
+### How to run
+
+From the repo root:
+
+```bash
+python scripts/startup.py                          # steps 1–3, then print next steps
+python scripts/startup.py --port-forward --verify  # + start forwards + full verification
+python scripts/startup.py --skip-infra             # infra already Running
+python scripts/startup.py --infra-only             # infra (+ monitoring), stop before apps
+python scripts/startup.py --stop-port-forward      # kill forwards this script started
+```
+
+### Options
+
+| Flag | Effect |
+|---|---|
+| `--skip-infra` | Skip step 1 (infra already up). |
+| `--skip-monitoring` | Skip step 2. |
+| `--infra-only` | Do steps 1–2 and stop before app services. |
+| `--disable-new-relic` | Set `JDK_JAVA_OPTIONS=''` on the 3 app deployments after apply. Use **only** if `newrelic-secret` still holds the placeholder key (otherwise the agent's uncapped reconnect loop is a real CPU cost — see `enable_new_relic.py` below). With a real key in the Secret, leave this off; the script prints which case it detected. |
+| `--port-forward` | Start the step-4 port-forwards detached after services are up. |
+| `--with-db` | Also forward `postgres:5432` and `couchbase:8091/8093/11210` (implies `--port-forward`). |
+| `--stop-port-forward` | Kill port-forwards recorded in `scripts/.portforward.pids`, then exit. Does nothing to forwards you started by hand (see `SHUTDOWN.md` step 0 for those). |
+| `--verify` | Run the step-6 checks. |
+| `--timeout N` | Per-resource readiness timeout in seconds (default 600 — Couchbase is slow on this node). |
+
+### Notes / limitations
+
+- **Not for a fresh cluster** — no image builds, namespace/network-policy apply, or Node.js
+  install. That's a one-time manual run-through of `STARTUP.md`'s fresh-cluster section.
+- Port-forwards die silently whenever their backing pod is recreated (any later
+  `kubectl apply` / `rollout restart` / HPA scale-up). If a previously-working local
+  connection drops, `--stop-port-forward` then `--skip-infra --skip-monitoring --port-forward`
+  re-establishes the set. This is `kubectl port-forward` behaviour, not a script bug.
+- On Windows the detached forwards are real background `kubectl.exe` processes; the PID file
+  is how `--stop-port-forward` (via `taskkill`) finds them. Deleting the PID file by hand
+  orphans them — `taskkill //IM kubectl.exe //F` then clears everything (`SHUTDOWN.md` step 0).
+
+---
+
 ## enable_new_relic.py
 
 Patches a real New Relic license key into the cluster and re-enables the New Relic Java

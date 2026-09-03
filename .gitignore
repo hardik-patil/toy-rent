@@ -53,3 +53,11 @@ application-secrets.yml
 
 ### Local Docker Compose port overrides ###
 docker-compose.override.yml
+
+### scripts/startup.py local runtime state ###
+scripts/.portforward.pids
+scripts/.portforward-logs/
+
+### Python ###
+__pycache__/
+*.pyc
