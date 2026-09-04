@@ -61,3 +61,9 @@ scripts/.portforward-logs/
 ### Python ###
 __pycache__/
 *.pyc
+
+### JMeter run output - generated per run, not source (results/ alone has hit 1.3GB:
+### raw JTLs, engine logs, and the HTML dashboard's vendor JS/CSS tree) ###
+loadtest/results/
+loadtest/*.jtl
+loadtest/*.log
