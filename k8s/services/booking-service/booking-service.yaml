@@ -60,7 +60,7 @@ spec:
     spec:
       containers:
         - name: booking-service
-          image: toyrental/booking-service:1.0.10
+          image: toyrental/booking-service:1.0.12
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8082

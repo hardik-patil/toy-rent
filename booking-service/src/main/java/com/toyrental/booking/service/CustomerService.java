@@ -65,7 +65,14 @@ public class CustomerService {
         return CustomerResponse.from(saved);
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * Deliberately NOT @Transactional. The only DB touch is one indexed findByPhone; the
+     * expensive part is the BCrypt verify + JWT sign that follow, which are pure CPU. Wrapping
+     * the method in a (read-only) transaction made Spring hold a HikariCP connection for that
+     * whole stretch — under a burst of concurrent logins that pinned the small pool doing zero
+     * DB work and starved booking traffic too (see learning/bottleneck-faced-resolved.md,
+     * bottleneck #1). Customer has no lazy associations, so the entity is safe to use detached.
+     */
     public LoginResponse login(LoginRequest request) {
         Customer customer = customerRepository.findByPhone(request.phone())
                 .filter(Customer::isActive)

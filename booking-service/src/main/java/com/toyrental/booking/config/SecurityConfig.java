@@ -37,9 +37,19 @@ import java.util.stream.Stream;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    /**
+     * BCrypt work factor. Default 10 (Spring's own default) is the right choice for a real
+     * deployment. It is tunable here only so the load-test environment can dial it down to
+     * match the CPU actually available to the pod — a burst of concurrent logins is pure,
+     * un-parallelisable CPU on a ~1-vCPU-throttled pod and was measured pushing login p99
+     * past a 10s client timeout (see learning/bottleneck-faced-resolved.md, bottleneck #1).
+     * NOTE: {@code matches()} reads the cost from each stored hash's {@code $2a$NN$} prefix,
+     * so lowering this only takes effect for hashes (re)created by {@code encode()} afterwards
+     * — existing rows must be re-seeded at the new cost.
+     */
     @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+    public PasswordEncoder passwordEncoder(@Value("${security.bcrypt.strength:10}") int strength) {
+        return new BCryptPasswordEncoder(strength);
     }
 
     /**

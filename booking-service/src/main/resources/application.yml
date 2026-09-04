@@ -9,10 +9,37 @@ spring:
     username: ${POSTGRES_USER:bookinguser}
     password: ${POSTGRES_PASSWORD:bookingpass}
     hikari:
-      maximum-pool-size: 10
+      # Raised 10 -> 30 (matches CLAUDE.md's target). At 10, a burst of concurrent bookings
+      # plus the login herd (before bottleneck #1's fix) exhausted the pool; callers then
+      # queued up to connection-timeout. See learning/perf-analysis-booking-latency.md (#2).
+      maximum-pool-size: 30
       minimum-idle: 5
       connection-timeout: 30000
       idle-timeout: 600000
+  cloud:
+    openfeign:
+      httpclient:
+        # feign-hc5 on the classpath switches Feign to a pooled Apache HttpClient 5.
+        max-connections: 200
+        max-connections-per-route: 50
+        # Recycle idle connections after 30s. Without a TTL, a pooled keep-alive connection
+        # stays pinned to whichever toy-service pod kube-proxy (L4) first routed it to, so
+        # one replica takes all the internal traffic. A short TTL forces re-connect ->
+        # re-balance. See learning/perf-analysis-pod-load-imbalance.md (bottleneck #3).
+        time-to-live: 30
+        time-to-live-unit: seconds
+      client:
+        config:
+          default:
+            # Fail fast instead of Feign's ~10s connect / 60s read defaults. A slow
+            # toy-service call otherwise stalls a booking while it holds the pessimistic
+            # overlap lock + a DB connection (bottleneck #2).
+            connect-timeout: 1000
+            read-timeout: 3000
+            logger-level: basic
+          toy-service:
+            connect-timeout: 1000
+            read-timeout: 3000
   jpa:
     hibernate:
       ddl-auto: validate
@@ -61,6 +88,15 @@ spring:
 admin:
   username: ${ADMIN_USERNAME:admin}
   password: ${ADMIN_PASSWORD:admin123}
+
+security:
+  bcrypt:
+    # Work factor for password hashing/verification. 10 (the default) is correct for a real
+    # deployment. Lower it ONLY for the load-test env to match the pod's ~1 vCPU budget —
+    # concurrent logins are un-parallelisable CPU and were pushing login p99 past the client
+    # timeout (learning/bottleneck-faced-resolved.md #1). If lowered, the seeded customer
+    # rows must be re-hashed at the same cost (loadtest/seed_loadtest_customers.sql).
+    strength: ${BCRYPT_STRENGTH:10}
 
 couchbase:
   connection-string: ${COUCHBASE_CONNECTION_STRING:couchbase://localhost}

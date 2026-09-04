@@ -99,6 +99,15 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-openfeign</artifactId>
         </dependency>
+        <!-- Pooled Apache HttpClient 5 for Feign. Without this, Feign uses a plain
+             HttpURLConnection: a fresh TCP connection per call, no reuse. Spring Cloud
+             OpenFeign auto-detects this on the classpath and switches the Feign client to
+             the pooled HC5 one (spring.cloud.openfeign.httpclient.*). See
+             learning/perf-analysis-booking-latency.md (bottleneck #2). -->
+        <dependency>
+            <groupId>io.github.openfeign</groupId>
+            <artifactId>feign-hc5</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.github.resilience4j</groupId>
             <artifactId>resilience4j-spring-boot3</artifactId>
