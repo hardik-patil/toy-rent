@@ -115,3 +115,14 @@ scale-down, exactly like Step 1's warning above. Delete the HPA, then scale.
 **Not part of this cycle:** the Dynatrace Operator (`dynatrace` namespace) isn't scaled
 down here, same as `STARTUP.md` never scales it up — it's a one-time install, left
 running (or not, if you never completed that setup) independent of this stop/start flow.
+
+**Also not part of this cycle: Jenkins.** It's a plain `docker run` container, not a
+Kubernetes resource, so nothing above touches it. Stop it separately if you want the
+CPU/memory back:
+```bash
+docker stop jenkins
+```
+Its state (job configs, plugins, build history) lives in the `jenkins_home` named Docker
+volume, not the container itself — stopping (or even `docker rm`-ing, as long as the
+volume survives) loses nothing. Bring it back with `docker start jenkins` (existing
+container) — see `STARTUP.md`'s Jenkins section for the full first-time-setup version.

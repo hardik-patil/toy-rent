@@ -32,8 +32,9 @@ leaves things in).
 5. Prints the frontend start command (`cd frontend && npm run dev`) — a dev server isn't
    this script's to own.
 6. *(`--verify`)* health-checks both services, lists Prometheus scrape-target health, lists
-   Zipkin services, and greps each app's New Relic agent log for `connected to collector` /
-   `Invalid license key`. The HTTP checks need the port-forwards up (via `--port-forward` or
+   Zipkin services, greps each app's New Relic agent log for `connected to collector` /
+   `Invalid license key`, and reports whether the `jenkins` Docker container is running and
+   reachable at `:8080`. The HTTP checks need the port-forwards up (via `--port-forward` or
    your own).
 
 ### Prerequisites
@@ -80,6 +81,10 @@ python scripts/startup.py --stop-port-forward      # kill forwards this script s
 - On Windows the detached forwards are real background `kubectl.exe` processes; the PID file
   is how `--stop-port-forward` (via `taskkill`) finds them. Deleting the PID file by hand
   orphans them — `taskkill //IM kubectl.exe //F` then clears everything (`SHUTDOWN.md` step 0).
+- **This script never starts, stops, or scales Jenkins** — it's a plain `docker run`
+  container, not a Kubernetes resource, so it's outside this script's whole model of
+  "stopped cluster → back up." `--verify` only reports its status; see `STARTUP.md`'s
+  Jenkins section for the actual `docker run`/`docker start`/`docker stop` commands.
 
 ---
 

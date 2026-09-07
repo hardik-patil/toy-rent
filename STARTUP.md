@@ -314,6 +314,7 @@ agent overhead once the key is real.
 | Grafana | `http://localhost:3000` | `admin` / `admin` |
 | Zipkin | `http://localhost:9411/zipkin/` | — |
 | New Relic APM | `https://one.newrelic.com` → APM & Services → `toy-service` / `booking-service` / `api-gateway` | your New Relic account login |
+| Jenkins (CI/CD) | `http://localhost:8080` | set during first-time setup — see below |
 
 `api-gateway` has no local URL — it's intentionally not port-forwarded (see step 4's
 note: its Keycloak JWT validation was never wired up, so nothing actually routes through
@@ -365,6 +366,49 @@ tenant. Until then, `kubectl get dynakube -n dynatrace` reports a connectivity/a
 in status — expected, and it doesn't block pod injection itself. See `CLAUDE.md`'s
 Kubernetes section for what's monitored (toy-rental namespace, applicationMonitoring
 mode only, apiVersion v1beta6).
+
+---
+
+## Jenkins CI/CD (independent of the K8s stack — not part of the regular cycle)
+
+**Not a Kubernetes pod, in any namespace.** Jenkins runs as a plain `docker run` container
+alongside (not inside) the K8s cluster — `kubectl get pods -A | grep jenkins` returns
+nothing by design. It isn't scaled up/down by anything in this doc's steps 1-3 or by
+`SHUTDOWN.md`; it's a separate long-lived container you start/stop independently. Full
+design writeup: `learning/jmeter-jenkins-guide.md`. Jenkinsfile syntax reference:
+`learning/jenkinsfile-fundamentals.md`. The pipeline itself: `loadtest/Jenkinsfile`.
+
+**One-time setup** (already done on this machine — included here for a fresh machine):
+```bash
+docker pull jenkins/jenkins:lts
+docker run -d --name jenkins \
+  -p 8080:8080 -p 50000:50000 \
+  -v jenkins_home:/var/jenkins_home \
+  -v "C:\Users\USER\Software\apache-jmeter-5.6.3:/opt/jmeter:ro" \
+  jenkins/jenkins:lts
+```
+Then complete Jenkins' own setup wizard at `http://localhost:8080` (unlock password from
+`docker logs jenkins`), install the **Performance** and **HTML Publisher** plugins, and
+run the one-time CSP fix via **Manage Jenkins → Script Console**:
+```groovy
+System.setProperty("hudson.model.DirectoryBrowserSupport.CSP", "")
+```
+All of this is one-time — `jenkins_home` is a named Docker volume, so job configs,
+plugins, and build history persist across container stop/start (and across `docker rm`,
+as long as the volume itself isn't deleted).
+
+**Regular start/stop**, once the container already exists:
+```bash
+docker start jenkins   # bring it back up
+docker stop jenkins    # stop it (frees the CPU/memory; state is preserved)
+docker ps --filter name=jenkins   # check whether it's running
+```
+
+**Before a real (non-smoke-only) build:** the pipeline hits `toy-service`/`booking-service`
+through `host.docker.internal`, which reaches whatever the host's `kubectl port-forward`
+is pointing at — so the app services and their port-forwards (steps 1-4 above) need to
+already be up, same as for a manual JMeter run. A pure Jenkins-UI-only session (browsing
+job history, editing the Jenkinsfile, installing plugins) doesn't need the cluster at all.
 
 ---
 

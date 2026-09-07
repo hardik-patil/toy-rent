@@ -24,7 +24,13 @@ What it does, in order (same as STARTUP.md):
      kill them later.
   5. Print the frontend start command (a dev server isn't this script's to own).
   6. (--verify) Health-check both services, list Prometheus scrape-target
-     health, list Zipkin services, and check each app's New Relic agent log.
+     health, list Zipkin services, check each app's New Relic agent log, and
+     report whether the Jenkins container is running.
+
+Note: Jenkins (CI/CD, loadtest/Jenkinsfile) is a plain `docker run` container,
+not a Kubernetes resource - this script never starts/stops it, same as it never
+touches the Dynatrace Operator. --verify only reports its status. See
+STARTUP.md's "Jenkins CI/CD" section for the actual start/stop commands.
 
 Usage:
     python scripts/startup.py                     # steps 1-3, then print next steps
@@ -437,6 +443,22 @@ def verify():
             print(f"  {svc}: {matches[-1].strip()[:140]}")
         else:
             print(f"  {svc}: no connect/invalid-key line (agent disabled, or still connecting)")
+
+    print("\n-- Jenkins (plain docker container, not part of this script's cycle) --")
+    r = subprocess.run(
+        ["docker", "inspect", "-f", "{{.State.Status}}", "jenkins"],
+        text=True, capture_output=True,
+    )
+    if r.returncode != 0:
+        print("  no container named 'jenkins' found (never created, or removed) - "
+              "see STARTUP.md's Jenkins section for first-time setup")
+    elif r.stdout.strip() == "running":
+        status, _ = http_get("http://localhost:8080/login")
+        reachable = "reachable" if status in (200, 403) else f"container up but HTTP {status}"
+        print(f"  running, {reachable} at http://localhost:8080")
+    else:
+        print(f"  container exists but not running (status: {r.stdout.strip()}) - "
+              "docker start jenkins to bring it back")
 
 
 # --------------------------------------------------------------------------- #
