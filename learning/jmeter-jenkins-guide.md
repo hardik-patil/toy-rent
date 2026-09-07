@@ -220,21 +220,370 @@ Small things that add up in a report you'll actually read at 2am during an incid
 
 # Part 2 — Jenkins CI/CD pipeline
 
-*Not started yet.* Plan when we get there (from the original roadmap):
+**Status:** design written up in full, nothing built yet. Read this whole part once, then
+come back and follow §4 onward step by step when you're ready to actually stand this up —
+that was the deliberate split for this session: docs first, hands-on later.
 
-1. Why perf tests in CI; what "pass/fail" means for a load test
-2. Jenkinsfile basics: stages, agents, `sh`, artifacts, `post`
-3. Getting JMeter onto the agent (Docker image vs installed tool vs Performance Plugin)
-4. The pipeline: checkout → params → run non-GUI → publish HTML → **gate** on thresholds
-   (error %, p95, throughput floor)
-5. Parameterised builds & trending (Performance Plugin / Backend Listener →
-   InfluxDB+Grafana)
-6. Build `loadtest/Jenkinsfile` + a `run.sh` wrapper for this repo, using
-   `ToyRentalMixed-60-tps.jmx` as the plan under CI
+**Target plan:** `loadtest/Regression_toyRental.jmx` (not `ToyRentalMixed-60-tps.jmx` —
+see the second reference block at the bottom of this file for its structure). **It has one
+known blocker that must be fixed before Jenkins can run it — §7 below, not yet applied.**
+
+**Source of truth:** GitHub, not a local copy. Jenkins' `checkout scm` step clones
+`https://github.com/hardik-patil/toy-rent.git` fresh on every build — the repo is never
+bind-mounted into the Jenkins container. This is *the* structural decision behind
+everything below, so it's worth stating up front: whatever's committed and pushed is what
+runs. A `.jmx` edit that only exists on your machine is invisible to the pipeline.
+
+## 1. Why this exists — the two ways a load-test build can fail
+
+A CI-run load test fails for one of two structurally different reasons, and the whole gate
+design below exists to tell them apart:
+
+- **The run itself is broken.** Wrong host, a `.jmx` typo, the target service down, a CSV
+  file not found (see §7). Nothing measured is trustworthy — nothing "passed," nothing
+  "failed," the test just didn't happen. This should be a hard pipeline `FAILURE`.
+- **The run succeeded, but breached a target.** JMeter executed the full plan against a
+  live, responding system, and the numbers say the app is too slow or too error-prone. This
+  is a real signal about the *application*, not the pipeline — it should mark the build
+  `UNSTABLE` (visible, alarming, but distinct from "the pipeline is broken").
+
+Conflating these two is the single most common mistake in a first CI perf-gate: a script bug
+and a real regression end up looking identical (both "red") unless the pipeline
+deliberately keeps `FAILURE` and `UNSTABLE` as separate outcomes. §6's gate stage uses both
+on purpose.
+
+## 2. Jenkins basics — just enough vocabulary
+
+- **Controller** — the Jenkins server itself (web UI, job configs, scheduling). **Agent** —
+  where the actual work (`sh` steps) executes. In this setup there's only one machine
+  doing both jobs: the single `jenkins/jenkins:lts` container is its own agent (`agent any`
+  in the Jenkinsfile just means "run on whatever agent is available," which here is always
+  the controller itself — there's nothing else registered).
+- **Job** — a configured pipeline (created once in the UI). **Build** — one execution of a
+  job, numbered (`#1`, `#2`, …) — `env.BUILD_NUMBER` in a Jenkinsfile refers to this.
+- **Jenkinsfile** — a text file, checked into the repo, that *is* the pipeline definition.
+  "Pipeline as code": the job configured in the Jenkins UI just points at this file (via
+  SCM) rather than containing the pipeline logic itself.
+- **Declarative vs. scripted pipeline** — two syntaxes for a Jenkinsfile. Declarative
+  (`pipeline { ... }`, a fixed structure of `agent`/`stages`/`post`) is the modern default —
+  more restrictive, but easier to read and lint. Scripted (arbitrary Groovy) is the older,
+  more powerful, more error-prone style. Everything here is declarative.
+- **Anatomy of a declarative Jenkinsfile** — the blocks used in §6:
+  - `pipeline { agent { ... } ... }` — the whole file is one `pipeline` block; `agent`
+    says where it runs.
+  - `parameters { choice(...); string(...) }` — declares build-time inputs, shows up as a
+    form when you click "Build with Parameters" in the UI.
+  - `environment { NAME = "value" }` — variables available to every stage as `env.NAME` /
+    `${NAME}` inside `sh` strings.
+  - `stages { stage('Name') { steps { ... } } }` — the sequence of named steps; each
+    `stage` shows as its own box in the Jenkins UI's pipeline visualization.
+  - `post { always { } success { } failure { } unstable { } }` — runs after all stages,
+    branching on the final build result. `always` runs no matter what — this is where
+    artifact archiving and report publishing belong, so you get a report even on failure.
+
+## 3. Architecture for this pipeline
+
+```
+┌─────────────────────────── Windows host ───────────────────────────┐
+│                                                                      │
+│  kubectl port-forward → localhost:8081 (toy-service)                │
+│                       → localhost:8082 (booking-service)            │
+│                                                                      │
+│  ┌───────────────── Docker container: jenkins ─────────────────┐    │
+│  │  jenkins/jenkins:lts (bundles a JDK)                         │    │
+│  │                                                               │    │
+│  │  bind mount (ro): apache-jmeter-5.6.3 → /opt/jmeter          │    │
+│  │  named volume:    jenkins_home → /var/jenkins_home           │    │
+│  │                                                               │    │
+│  │  pipeline build:                                             │    │
+│  │    checkout scm  ──────────────────────────────┐             │    │
+│  │    /opt/jmeter/bin/jmeter -n -t loadtest/...    │             │    │
+│  │      -JHOST=host.docker.internal ───────────────┼──────────► localhost:8081/8082
+│  │    perfReport + publishHTML                     │             │    │
+│  └──────────────────────────────────────────────────┼───────────┘    │
+│                                                       │                │
+└───────────────────────────────────────────────────────┼────────────────┘
+                                                          ▼
+                                          github.com/hardik-patil/toy-rent
+                                          (checkout scm clones from here)
+```
+
+Two things carry the whole design:
+
+1. **Only JMeter is bind-mounted; the repo isn't.** The repo enters the container fresh,
+   every build, via `checkout scm` — that's what "running from GitHub" means concretely.
+   JMeter is bind-mounted because it's a portable, already-installed, self-contained
+   directory (`C:\Users\USER\Software\apache-jmeter-5.6.3`) with nothing to gain from being
+   re-downloaded every build, and no image to build.
+2. **`host.docker.internal` bridges container → host.** JMeter runs *inside* the container;
+   the actual services are reachable via `kubectl port-forward` on the *host's* `localhost`.
+   Docker Desktop for Windows auto-injects `host.docker.internal` into every container's
+   `/etc/hosts` pointing at the host — no `--add-host` flag needed here. Worth remembering
+   this is a Docker-Desktop convenience: a real Linux CI agent wouldn't have this for free.
+
+**Alternatives considered, and why not:**
+- **Jenkins as a Kubernetes Deployment in the existing cluster** — would let Jenkins reach
+  `toy-service`/`booking-service` by their in-cluster Service DNS names directly (no
+  port-forward, no `host.docker.internal`), which sounds cleaner, but drags in a Helm
+  chart or raw manifests, a PVC for `JENKINS_HOME`, and probably the Kubernetes agent
+  plugin — real infrastructure unrelated to the actual goal of "learn a Jenkinsfile." Worth
+  revisiting once the cluster is the permanent home for this app, not for a first pipeline.
+- **Native Windows Jenkins install** — works, but every `sh` step in this doc becomes a
+  `bat`/PowerShell step, which fights nearly every mainstream Jenkinsfile example
+  (including this one). Also harder to reset cleanly (`docker rm -f jenkins` vs.
+  uninstalling a Windows service) when a lesson needs a do-over.
+- **A JMeter Docker image (e.g. `justb4/jmeter`) instead of bind-mounting the local
+  install** — more "correct" for a hardened CI setup (versioned, no host-path dependency),
+  but means either Docker-outside-of-Docker (mounting the Docker socket into the Jenkins
+  container, a real extra concept) or a multi-container agent (`podTemplate`, Kubernetes
+  plugin territory again). Good hardening exercise for *after* the first working pipeline.
+
+## 4. One-time environment setup
+
+Before this: scale the K8s cluster down (nothing in this section needs it):
+```bash
+kubectl scale statefulset -n infra couchbase kafka minio postgres --replicas=0
+kubectl scale deployment  -n infra keycloak redis wiremock postgres-exporter kafka-lag-exporter --replicas=0
+kubectl scale deployment  -n monitoring grafana prometheus zipkin --replicas=0
+kubectl scale deployment  -n toy-rental api-gateway toy-service booking-service --replicas=0
+```
+(Or follow `SHUTDOWN.md` if it does more, e.g. removing HPAs.)
+
+Start Jenkins:
+```powershell
+docker run -d --name jenkins `
+  -p 8080:8080 -p 50000:50000 `
+  -v jenkins_home:/var/jenkins_home `
+  -v "C:\Users\USER\Software\apache-jmeter-5.6.3:/opt/jmeter:ro" `
+  jenkins/jenkins:lts
+```
+- `jenkins_home` is a **named volume**, not a Windows bind-mount — this is Jenkins' own
+  state (job configs, plugins, build history), and keeping it off a Windows bind-mount
+  sidesteps the whole class of Linux-UID-vs-NTFS permission questions entirely.
+- JMeter is the *only* bind mount for now, and it's read-only — nothing in Jenkins should
+  ever need to write into your local JMeter install.
+- The repo itself is deliberately **not** mounted here — see the "source of truth" note
+  above; it arrives via `checkout scm` in §6, not a mount.
+
+Then, in your browser at `http://localhost:8080`, work through Jenkins' own setup wizard
+yourself: unlock with the initial admin password (`docker exec jenkins cat
+/var/jenkins_home/secrets/initialAdminPassword`), install the suggested plugins, create the
+first admin user.
+
+Two plugins beyond that default set, installed manually via **Manage Jenkins → Plugins →
+Available**:
+- **Performance** — provides the `perfReport` pipeline step (§6).
+- **HTML Publisher** — provides the `publishHTML` pipeline step (§6).
+
+**Verify before moving on:**
+```bash
+docker exec jenkins java -version
+docker exec jenkins /opt/jmeter/bin/jmeter --version
+docker exec jenkins file /opt/jmeter/bin/jmeter
+```
+The last command should report a Unix shell script, not "with CRLF line terminators" — the
+JMeter distribution was unzipped, not git-checked-out, so this is expected to pass first
+try; it's a one-line sanity check, not a fix-it-in-advance step.
+
+**One known first-timer trip-up, fixed once, in advance:** the JMeter HTML dashboard
+(§6's `publishHTML`) will render unstyled/broken the first time — Jenkins' default
+Content-Security-Policy blocks the report's own CSS/JS by default. Fix once via **Manage
+Jenkins → Script Console**:
+```groovy
+System.setProperty("hudson.model.DirectoryBrowserSupport.CSP", "")
+```
+
+## 5. Connecting Jenkins to GitHub
+
+Create a new **Pipeline** job. Under "Pipeline," choose **"Pipeline script from SCM"** →
+Git → repository URL `https://github.com/hardik-patil/toy-rent.git`, branch
+`*/docs/session-lessons-learned` (or whichever branch has `Regression_toyRental.jmx` —
+check with `git branch --show-current` before configuring the job; adjust once merged to
+`main`). Script path: `loadtest/Jenkinsfile`.
+
+The repo is **public**, so no credentials are needed for checkout. (If it were private:
+a GitHub Personal Access Token or deploy key, added once via **Manage Jenkins →
+Credentials**, then selected in the job's SCM config — not needed today, worth knowing for
+later.)
+
+**What actually triggers a build on a push** — two options, a real tradeoff, not a "pick
+either":
+- **Poll SCM** (`* * * * *` or similar, in the job's Build Triggers) — Jenkins checks
+  GitHub on a schedule and starts a build if the branch moved. Simple, no inbound
+  networking required, slightly delayed (up to the poll interval).
+- **GitHub webhook** — GitHub calls Jenkins the instant you push. Instant, but requires
+  Jenkins to be reachable *from GitHub's servers*, which a `localhost:8080` Docker Desktop
+  setup isn't, without a tunnel (ngrok or similar) or a real public deployment.
+
+**Recommendation: start with Poll SCM.** It's a one-line config, needs nothing exposed to
+the internet, and teaches the actual pipeline mechanics without an unrelated tunneling
+detour. Revisit the webhook once Jenkins has a real, reachable address.
+
+## 6. The Jenkinsfile
+
+Commit this at `loadtest/Jenkinsfile`:
+
+```groovy
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'TEST_LEVEL', choices: ['smoke', 'expected'], description: 'Which SLOs.md tier to run/gate against')
+        string(name: 'THREADS',       defaultValue: '5',  description: 'Concurrent virtual users')
+        string(name: 'RAMP_UP',       defaultValue: '10', description: 'Ramp-up seconds')
+        string(name: 'TEST_DURATION', defaultValue: '90', description: 'Scheduler duration, seconds')
+        string(name: 'TPS',           defaultValue: '5',  description: 'Target throughput')
+    }
+
+    environment {
+        RESULTS_DIR = "loadtest/results/${env.BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Prepare results dir') {
+            steps {
+                sh "mkdir -p ${RESULTS_DIR}"
+            }
+        }
+
+        stage('Run JMeter (non-GUI)') {
+            steps {
+                sh """
+                    /opt/jmeter/bin/jmeter -n \
+                        -t loadtest/Regression_toyRental.jmx \
+                        -JHOST=host.docker.internal -JTOY_PORT=8081 -JBOOKING_PORT=8082 \
+                        -JTHREADS=${params.THREADS} -JRAMP_UP=${params.RAMP_UP} \
+                        -JTEST_DURATION=${params.TEST_DURATION} -JTPS=${params.TPS} \
+                        -l ${RESULTS_DIR}/result.jtl \
+                        -e -o ${RESULTS_DIR}/html-report
+                """
+            }
+        }
+
+        stage('Performance gate') {
+            steps {
+                perfReport sourceDataFiles: "${RESULTS_DIR}/result.jtl",
+                    errorFailedThreshold: 20,
+                    errorUnstableThreshold: 5
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: "${RESULTS_DIR}/result.jtl", allowEmptyArchive: true
+            publishHTML(target: [
+                reportName: 'JMeter Dashboard',
+                reportDir:  "${RESULTS_DIR}/html-report",
+                reportFiles: 'index.html',
+                keepAll: true,
+                alwaysLinkToLastBuild: true,
+                allowMissing: true
+            ])
+        }
+    }
+}
+```
+
+Walking through the parts not already covered in §2:
+- **`parameters`** — `TEST_LEVEL` is a closed `choice`, not a free string, so the set of
+  valid values is discoverable from the "Build with Parameters" form itself. The four
+  numeric knobs default to `loadtest/SLOs.md`'s **Smoke** tier (2–5 VU, short duration,
+  "script/env sanity") — the right default for a CI-triggered run; the heavier **Expected**
+  tier (40 VU, 20 min) is something you'd override at build time, not the default.
+- **Declarative `string` parameters are always strings**, even for these numeric knobs —
+  they're substituted straight into `-J` flags as text, which is fine; don't go looking for
+  a numeric parameter type, there isn't an idiomatic one for this use case.
+- **`RESULTS_DIR` keyed by `BUILD_NUMBER`** — every build's raw `.jtl` and HTML report land
+  in their own subdirectory, so builds never clobber each other's results, and old ones stay
+  inspectable via **archiveArtifacts**.
+- **`perfReport` thresholds are percentages of failed requests** — `errorFailedThreshold:
+  20` marks the build `FAILURE` above 20% errors; `errorUnstableThreshold: 5` marks it
+  `UNSTABLE` between 5–20%. This is deliberately an error-rate-only gate at the Smoke tier
+  (matching SLOs.md's own words for that tier: "all green, ignore latency") — no p95 check
+  yet, see §8 for why.
+- **`archiveArtifacts` gets only the `.jtl`**, never the whole `html-report` directory —
+  that's what `publishHTML` is for. Archiving both would double-store the same data and
+  create two different "where do I look" answers for the same report.
+- **`TEST_LEVEL` isn't consumed by the JMeter invocation itself** — the `.jmx`'s own `-J`
+  properties don't know about a "level" concept; it's a hook for the gate stage to branch
+  on later (§8). Don't conflate "which SLO tier we're gating against" with "what numbers we
+  pass to JMeter" — related, but distinct, and a good thing to keep straight from the start.
+
+**Not needed for this pipeline, on purpose:** Jenkins Credentials Manager. `CUST_PHONE`/
+`CUST_PASSWORD` are already-committed synthetic load-test fixtures
+(`loadtest/seed_loadtest_customers.sql`), not real secrets — passing them as plain `-J`
+values (hardcoded or as two more `string` parameters, your call) matches how the rest of
+the repo already treats them. `credentials()` / `withCredentials {}` are real, valuable
+concepts — worth learning on a pipeline that actually has a secret to protect, not this one.
+
+## 7. Prerequisite fix — `Regression_toyRental.jmx`'s absolute CSV paths
+
+**Not yet applied — do this before the pipeline above can actually run.** Both
+`CSVDataSet` elements in `Regression_toyRental.jmx` currently hold absolute Windows paths:
+
+```
+C:/Users/USER/Documents/toy-rent/loadtest/data/toy_ids.csv       (used twice)
+C:/Users/USER/Documents/toy-rent/loadtest/data/browse_params.csv
+```
+
+This is Part 1, lesson 7 ("Absolute paths break the moment the plan leaves your machine")
+made concrete: once Jenkins clones the repo fresh into its own container workspace via
+`checkout scm`, `C:\Users\USER\...` doesn't exist inside that Linux container at all — the
+CSV Data Sets will fail to find their files and every sampler that depends on them (toy
+IDs, browse params) will error out. Fix (in the JMeter GUI, or by hand-editing the `.jmx`'s
+`CSVDataSet.filename` properties): change both to paths relative to the `.jmx` file itself —
+```
+data/toy_ids.csv
+data/browse_params.csv
+```
+— matching how `ToyRentalMixed-60-tps.jmx`'s own CSV Data Sets are already configured (see
+the first reference block below). JMeter resolves a relative CSV path against the `.jmx`
+file's own directory in both GUI and `-n` CLI modes, so this works identically on your
+machine and inside the Jenkins container once the repo is checked out to
+`loadtest/Regression_toyRental.jmx` either way.
+
+## 8. Why the gate stops at "smoke," on purpose
+
+`perfReport`'s thresholds only see the **whole-file** error rate and response time — it has
+no concept of `loadtest/SLOs.md`'s real per-journey targets (J1 Browse p95 ≤500ms, J2
+detail ≤400/300ms, J3 booking ≤1200/2500ms, etc.). Checking those for real means parsing
+the JMeter HTML dashboard's `statistics.json` per transaction-controller label and failing
+the build (via an `error()` step) if any journey's p95 breaches its own target — a real,
+useful next lesson (JSON parsing in a Jenkinsfile, `sh(returnStdout: true)`, `error()`), but
+meaningfully more work than the aggregate gate above.
+
+**Deliberately deferred as a named "Part 3,"** not half-built into this pass: the `smoke`
+tier's aggregate error-rate gate is the complete, working deliverable of Part 2. A
+per-journey `expected`-tier gate (using the `TEST_LEVEL` parameter's second value, branching
+the `perfReport` thresholds or adding a follow-on stage) is future work, once the basic
+pipeline is running end-to-end.
+
+## 9. Implementation checklist — do this when ready
+
+1. Fix `Regression_toyRental.jmx`'s CSV paths (§7) and push.
+2. Scale the K8s cluster down (§4).
+3. `docker run` Jenkins (§4), click through the setup wizard, install Performance +
+   HTML Publisher, run the CSP fix once.
+4. Create the Pipeline job pointed at GitHub (§5), Poll SCM trigger.
+5. Commit `loadtest/Jenkinsfile` (§6) — this is what the job actually runs, once pushed.
+6. Bring the K8s cluster back up (`python scripts/startup.py --port-forward`), confirm
+   `curl localhost:8081/actuator/health` / `localhost:8082/actuator/health` both `200`.
+7. Trigger a build (or push a trivial commit and watch Poll SCM pick it up). Confirm it
+   goes green, click through to the JMeter Dashboard link and the Performance report trend.
+8. Deliberately break the gate once — set `errorUnstableThreshold` unrealistically low, or
+   stop a service before triggering a build — to see `UNSTABLE`/`FAILURE` actually fire, not
+   just in theory.
 
 ---
 
-# Reference — the fixed plan's structure
+# Reference — `ToyRentalMixed-60-tps.jmx`'s structure
 
 ```
 Test Plan (UDVs: HOST, TOY_PORT, BOOKING_PORT, THREADS, CUST_PHONE, CUST_PASSWORD,
@@ -257,4 +606,49 @@ Run:
 jmeter -n -t loadtest/ToyRentalMixed-60-tps.jmx \
   -JTPS=60 -JTEST_DURATION=300 -JTHREADS=150 -JRAMP_UP=10 \
   -l loadtest/results/mixed60.jtl -e -o loadtest/results/mixed60-report
+```
+
+---
+
+# Reference — `Regression_toyRental.jmx`'s structure
+
+The Jenkins CI target (Part 2). Three **independent** Thread Groups running concurrently
+(not one mixed group with throughput controllers, unlike the plan above) — each with its
+own `${THREADS}`/`${RAMP_UP}`/`${TEST_DURATION}`, so all three run at the same VU count and
+schedule window by default.
+
+```
+Test Plan (UDVs: HOST, TOY_PORT, BOOKING_PORT, path_toys, path_bookings, path_login,
+                 THREADS, RAMP_UP, TEST_DURATION, p_transactions_per_min (TPS*60, __groovy),
+                 CUST_PHONE, CUST_PASSWORD)
+├─ HTTP Request Defaults, HTTP Header Manager
+├─ CSV Data Set × 2 (toy_ids.csv, ⚠ currently ABSOLUTE Windows paths — fix per §7 above)
+│
+├─ Thread Group "Toys Details" (${THREADS}, ${RAMP_UP}, ${TEST_DURATION}, scheduler=true)
+│  └─ GET /toys/{toyId} → assert → Constant Throughput Timer → JSON Extractor → JSR223 PostProcessor
+│
+├─ Thread Group "BROWSE" (${THREADS}, ${RAMP_UP}, ${TEST_DURATION}, scheduler=true)
+│  ├─ CSV Data Set (browse_params.csv, ⚠ also absolute — same fix)
+│  └─ GET toys → Constant Throughput Timer → assert
+│
+└─ Thread Group "Bookings" (${THREADS}, ${RAMP_UP}, ${TEST_DURATION}, scheduler=true)
+   ├─ Once Only Controller → POST /login → JSON Extractor → JSR223 PostProcessor
+   ├─ While Controller (condition: __groovy, currentTimeMillis - tokenTimeStamp >= 900000)
+   │  └─ POST /login → JSON Extractor → JSR223 PostProcessor
+   └─ Simple Controller
+      └─ POST /api/v1/bookings → HTTP Header Manager (Bearer) → Constant Throughput Timer
+         → [JSR223 Assertion — disabled] → Response Assertion
+```
+
+Its relogin `While Controller` already uses `__groovy` for the static-method condition —
+the exact fix `ToyRentalMixed-60-tps.jmx` needed applied after the event (see this file's
+Part 1 lesson on `__jexl3` vs `__groovy`, and `CLAUDE.md`'s Known Bugs table, 2026-09-05
+entry). Nothing to change there.
+
+Run (once §7's path fix is applied):
+
+```bash
+jmeter -n -t loadtest/Regression_toyRental.jmx \
+  -JTHREADS=10 -JRAMP_UP=10 -JTEST_DURATION=90 -JTPS=5 \
+  -l loadtest/results/regression.jtl -e -o loadtest/results/regression-report
 ```
