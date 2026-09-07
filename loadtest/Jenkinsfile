@@ -20,6 +20,17 @@ pipeline {
             }
         }
 
+        stage('Clean previous run artifacts') {
+            steps {
+                // Regression_toyRental.jmx's "Toys Details" thread group writes
+                // toys_mrp<threadNum>.csv (relative path -> workspace root) in append
+                // mode on every request, with nothing to ever clean it up itself.
+                // checkout scm doesn't remove untracked files, so without this these
+                // files grow forever across builds instead of reflecting just this run.
+                sh 'rm -f toys_mrp*.csv'
+            }
+        }
+
         stage('Prepare results dir') {
             steps {
                 sh "mkdir -p ${RESULTS_DIR}"
