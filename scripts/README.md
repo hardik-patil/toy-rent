@@ -1,7 +1,9 @@
 # scripts/
 
 Operational helper scripts for the ToyRental platform. Not part of the application build —
-these talk to a live cluster via `kubectl`.
+these talk to a live cluster via `kubectl`. For *why* `startup.py`/`shutdown.py`/
+`capture_diagnostics.py` are each built the way they are (design decisions, not just what
+each flag does), see [../learning/ops-scripts-fundamentals.md](../learning/ops-scripts-fundamentals.md).
 
 ---
 
