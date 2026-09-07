@@ -37,7 +37,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -93,7 +93,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "up{job=~\"toy-service|booking-service|api-gateway\"}",
           "legendFormat": "{{job}}",
@@ -113,7 +113,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -188,7 +188,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (job) (rate(http_server_requests_seconds_count[5m]))",
           "legendFormat": "{{job}}",
@@ -208,7 +208,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -283,7 +283,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (job) (rate(http_server_requests_seconds_count{status=~\"5..\"}[5m]))",
           "legendFormat": "{{job}}",
@@ -316,7 +316,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -391,7 +391,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (rental_type) (rate(booking_created_total[5m]))",
           "legendFormat": "{{rental_type}}",
@@ -411,7 +411,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -486,7 +486,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum(rate(booking_conflict_total[5m]))",
           "legendFormat": "conflicts/sec",
@@ -506,7 +506,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -581,7 +581,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (method) (rate(payment_success_total[5m]))",
           "legendFormat": "success: {{method}}",
@@ -590,7 +590,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (reason) (rate(payment_failed_total[5m]))",
           "legendFormat": "failed: {{reason}}",
@@ -610,7 +610,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -685,7 +685,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (type) (rate(pdf_generation_duration_seconds_sum[5m])) / sum by (type) (rate(pdf_generation_duration_seconds_count[5m]))",
           "legendFormat": "{{type}}",
@@ -705,7 +705,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -780,7 +780,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (status) (increase(monthly_report_generated_total[1h]))",
           "legendFormat": "{{status}}",
@@ -800,7 +800,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "description": "toy_availability_cache_hit_total / (hit + miss) — a cold cache after a Couchbase restart shows this collapse toward 0 (Sprint 7's cache-warming bottleneck).",
       "fieldConfig": {
@@ -878,7 +878,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum(rate(toy_availability_cache_hit_total[5m])) / (sum(rate(toy_availability_cache_hit_total[5m])) + sum(rate(toy_availability_cache_miss_total[5m])))",
           "legendFormat": "hit ratio",
@@ -911,7 +911,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -990,7 +990,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -1014,7 +1014,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1093,7 +1093,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -1117,7 +1117,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1196,7 +1196,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -1220,7 +1220,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1299,7 +1299,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -1336,7 +1336,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1415,7 +1415,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (job) (jvm_memory_used_bytes{area=\"heap\"})",
           "legendFormat": "{{job}}",
@@ -1435,7 +1435,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1514,7 +1514,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "expr": "sum by (job) (jvm_memory_used_bytes{area=\"nonheap\"})",
@@ -1536,7 +1536,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1614,7 +1614,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "expr": "avg by (job) (process_cpu_usage{job=~\"api-gateway|toy-service|booking-service\"}) * 100",
@@ -1636,7 +1636,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1714,7 +1714,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"toy-rental\", container!=\"\"}[5m]))",
@@ -1749,7 +1749,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "description": "Single-partition topics (deliberate Sprint 7 bottleneck) — watch this climb under load before that fix lands.",
       "fieldConfig": {
@@ -1825,7 +1825,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "kafka_consumer_fetch_manager_records_lag_max",
           "legendFormat": "{{job}} {{client_id}}",
@@ -1845,7 +1845,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1920,7 +1920,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (group, topic) (kafka_consumergroup_group_lag)",
           "legendFormat": "{{group}} / {{topic}}",
@@ -1941,7 +1941,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -2016,7 +2016,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (topic) (kafka_partition_latest_offset - kafka_partition_earliest_offset)",
           "legendFormat": "{{topic}}",
@@ -2036,7 +2036,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -2111,7 +2111,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (job, topic) (rate(kafka_consumer_fetch_manager_records_consumed_total[5m]))",
           "legendFormat": "{{job}} {{topic}}",
@@ -2144,7 +2144,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -2201,7 +2201,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "pg_up",
           "legendFormat": "postgres",
@@ -2221,7 +2221,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -2296,7 +2296,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "pg_stat_database_numbackends{datname=~\"toydb|bookingdb\"}",
           "legendFormat": "{{datname}}",
@@ -2316,7 +2316,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -2391,7 +2391,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "pg_database_size_bytes{datname=~\"toydb|bookingdb\"}",
           "legendFormat": "{{datname}}",
@@ -2411,7 +2411,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -2486,7 +2486,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (datname) (rate(pg_stat_database_xact_commit{datname=~\"toydb|bookingdb\"}[5m]))",
           "legendFormat": "{{datname}} commit",
@@ -2495,7 +2495,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (datname) (rate(pg_stat_database_xact_rollback{datname=~\"toydb|bookingdb\"}[5m]))",
           "legendFormat": "{{datname}} rollback",
@@ -2515,7 +2515,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -2590,7 +2590,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum by (datname) (rate(pg_stat_database_blks_hit{datname=~\"toydb|bookingdb\"}[5m])) / (sum by (datname) (rate(pg_stat_database_blks_hit{datname=~\"toydb|bookingdb\"}[5m])) + sum by (datname) (rate(pg_stat_database_blks_read{datname=~\"toydb|bookingdb\"}[5m])))",
           "legendFormat": "{{datname}}",
@@ -2624,7 +2624,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -2699,7 +2699,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum(rate(kv_cmd_lookup[5m]))",
           "legendFormat": "reads",
@@ -2708,7 +2708,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum(rate(kv_cmd_mutation[5m]))",
           "legendFormat": "writes",
@@ -2728,7 +2728,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -2803,7 +2803,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "kv_curr_connections",
           "legendFormat": "connections",
@@ -2823,7 +2823,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -2898,7 +2898,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "kv_curr_items",
           "legendFormat": "{{bucket}}",
@@ -2918,7 +2918,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -2993,7 +2993,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "couch_docs_actual_disk_size",
           "legendFormat": "{{bucket}}",

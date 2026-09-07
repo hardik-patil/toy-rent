@@ -1,0 +1,419 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Test Plan">
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="HOST" elementType="Argument">
+            <stringProp name="Argument.name">HOST</stringProp>
+            <stringProp name="Argument.value">${__P(HOST,localhost)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="TOY_PORT" elementType="Argument">
+            <stringProp name="Argument.name">TOY_PORT</stringProp>
+            <stringProp name="Argument.value">${__P(TOY_PORT,8081)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="BOOKING_PORT" elementType="Argument">
+            <stringProp name="Argument.name">BOOKING_PORT</stringProp>
+            <stringProp name="Argument.value">${__P(BOOKING_PORT,8082)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="path_toys" elementType="Argument">
+            <stringProp name="Argument.name">path_toys</stringProp>
+            <stringProp name="Argument.value">/api/v1/toys</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="path_bookings" elementType="Argument">
+            <stringProp name="Argument.name">path_bookings</stringProp>
+            <stringProp name="Argument.value">/api/v1/bookings</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="path_login" elementType="Argument">
+            <stringProp name="Argument.name">path_login</stringProp>
+            <stringProp name="Argument.value">/api/v1/customers/login</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="THREADS" elementType="Argument">
+            <stringProp name="Argument.name">THREADS</stringProp>
+            <stringProp name="Argument.value">${__P(THREADS,10)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="RAMP_UP" elementType="Argument">
+            <stringProp name="Argument.name">RAMP_UP</stringProp>
+            <stringProp name="Argument.value">${__P(RAMP_UP,10)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="TEST_DURATION" elementType="Argument">
+            <stringProp name="Argument.name">TEST_DURATION</stringProp>
+            <stringProp name="Argument.value">${__P(TEST_DURATION,900)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="p_transactions_per_min" elementType="Argument">
+            <stringProp name="Argument.name">p_transactions_per_min</stringProp>
+            <stringProp name="Argument.value">${__groovy(${__P(TPS,60)}*60,)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="CUST_PHONE" elementType="Argument">
+            <stringProp name="Argument.name">CUST_PHONE</stringProp>
+            <stringProp name="Argument.value">${__P(CUST_PHONE,9821012345)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="CUST_PASSWORD" elementType="Argument">
+            <stringProp name="Argument.name">CUST_PASSWORD</stringProp>
+            <stringProp name="Argument.value">${__P(CUST_PASSWORD,password)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+    </TestPlan>
+    <hashTree>
+      <ConfigTestElement guiclass="HttpDefaultsGui" testclass="ConfigTestElement" testname="HTTP Request Defaults">
+        <stringProp name="HTTPSampler.domain">${HOST}</stringProp>
+        <stringProp name="HTTPSampler.protocol">http</stringProp>
+        <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+          <collectionProp name="Arguments.arguments"/>
+        </elementProp>
+        <stringProp name="HTTPSampler.implementation">HttpClient4</stringProp>
+      </ConfigTestElement>
+      <hashTree/>
+      <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header Manager">
+        <collectionProp name="HeaderManager.headers">
+          <elementProp name="" elementType="Header">
+            <stringProp name="Header.name">Content-Type</stringProp>
+            <stringProp name="Header.value">application/json</stringProp>
+          </elementProp>
+        </collectionProp>
+      </HeaderManager>
+      <hashTree/>
+      <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="CSV Data Set Config">
+        <stringProp name="delimiter">,</stringProp>
+        <stringProp name="fileEncoding"></stringProp>
+        <stringProp name="filename">C:/Users/USER/Documents/toy-rent/loadtest/data/toy_ids.csv</stringProp>
+        <boolProp name="ignoreFirstLine">true</boolProp>
+        <boolProp name="quotedData">false</boolProp>
+        <boolProp name="recycle">true</boolProp>
+        <stringProp name="shareMode">shareMode.all</stringProp>
+        <boolProp name="stopThread">false</boolProp>
+        <stringProp name="variableNames">toyId</stringProp>
+      </CSVDataSet>
+      <hashTree/>
+      <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="CSV Data Set Config">
+        <stringProp name="filename">C:/Users/USER/Documents/toy-rent/loadtest/data/toy_ids.csv</stringProp>
+        <stringProp name="fileEncoding"></stringProp>
+        <stringProp name="variableNames">toyId</stringProp>
+        <boolProp name="ignoreFirstLine">true</boolProp>
+        <stringProp name="delimiter">,</stringProp>
+        <boolProp name="quotedData">false</boolProp>
+        <boolProp name="recycle">true</boolProp>
+        <boolProp name="stopThread">false</boolProp>
+        <stringProp name="shareMode">shareMode.all</stringProp>
+      </CSVDataSet>
+      <hashTree/>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Toys Details" enabled="true">
+        <stringProp name="ThreadGroup.num_threads">${THREADS}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">${RAMP_UP}</stringProp>
+        <stringProp name="ThreadGroup.duration">${TEST_DURATION}</stringProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller">
+          <intProp name="LoopController.loops">-1</intProp>
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+        </elementProp>
+      </ThreadGroup>
+      <hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="GET /toys/{toyId}">
+          <stringProp name="HTTPSampler.port">${TOY_PORT}</stringProp>
+          <stringProp name="HTTPSampler.path">${path_toys}/${toyId}</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Response Assertion" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="49586">200</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.custom_message"></stringProp>
+            <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">16</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+          <ConstantThroughputTimer guiclass="TestBeanGUI" testclass="ConstantThroughputTimer" testname="Constant Throughput Timer" enabled="true">
+            <intProp name="calcMode">0</intProp>
+            <stringProp name="throughput">${__groovy(${p_transactions_per_min} * 0.30,)}</stringProp>
+          </ConstantThroughputTimer>
+          <hashTree/>
+          <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="JSON Extractor" enabled="true">
+            <stringProp name="JSONPostProcessor.referenceNames">mrp</stringProp>
+            <stringProp name="JSONPostProcessor.jsonPathExprs">$.mrp</stringProp>
+            <stringProp name="JSONPostProcessor.match_numbers">1</stringProp>
+            <stringProp name="JSONPostProcessor.defaultValues">NOT_FOUND</stringProp>
+          </JSONPostProcessor>
+          <hashTree/>
+          <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="JSR223 PostProcessor">
+            <stringProp name="cacheKey">true</stringProp>
+            <stringProp name="filename"></stringProp>
+            <stringProp name="parameters"></stringProp>
+            <stringProp name="script">def responseCode = prev.getResponseCode()
+
+if(responseCode != &apos;200&apos;){
+	AssertionResult.setFailure(true)
+	AssertionResult.setFailureMessage(&apos;Expected 200, but got: &apos;+ responseCode)
+}
+else{
+	file = new FileOutputStream(&quot;toys_mrp&quot;+ctx.getThreadNum()+&quot;.csv&quot;,true)
+	printStream = new PrintStream(file, true, &quot;UTF-8&quot;)
+	printStream.println(vars.get(&quot;toyId&quot;)+&quot;,&quot;+vars.get(&quot;mrp&quot;))
+	printStream.close()
+	file.close()
+}</stringProp>
+            <stringProp name="scriptLanguage">groovy</stringProp>
+          </JSR223PostProcessor>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="BROWSE">
+        <stringProp name="ThreadGroup.num_threads">${THREADS}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">${RAMP_UP}</stringProp>
+        <stringProp name="ThreadGroup.duration">${TEST_DURATION}</stringProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller">
+          <intProp name="LoopController.loops">-1</intProp>
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+        </elementProp>
+      </ThreadGroup>
+      <hashTree>
+        <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="CSV Data Set Config" enabled="true">
+          <stringProp name="filename">C:/Users/USER/Documents/toy-rent/loadtest/data/browse_params.csv</stringProp>
+          <stringProp name="fileEncoding"></stringProp>
+          <stringProp name="variableNames">category,ageGroup</stringProp>
+          <boolProp name="ignoreFirstLine">true</boolProp>
+          <stringProp name="delimiter">,</stringProp>
+          <boolProp name="quotedData">false</boolProp>
+          <boolProp name="recycle">true</boolProp>
+          <boolProp name="stopThread">false</boolProp>
+          <stringProp name="shareMode">shareMode.all</stringProp>
+        </CSVDataSet>
+        <hashTree/>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="GET toys" enabled="true">
+          <stringProp name="HTTPSampler.port">${TOY_PORT}</stringProp>
+          <stringProp name="HTTPSampler.path">${path_toys}</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="category" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">true</boolProp>
+                <stringProp name="Argument.value">${category}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+                <boolProp name="HTTPArgument.use_equals">true</boolProp>
+                <stringProp name="Argument.name">category</stringProp>
+              </elementProp>
+              <elementProp name="ageGroup" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">true</boolProp>
+                <stringProp name="Argument.value">${ageGroup}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+                <boolProp name="HTTPArgument.use_equals">true</boolProp>
+                <stringProp name="Argument.name">ageGroup</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <ConstantThroughputTimer guiclass="TestBeanGUI" testclass="ConstantThroughputTimer" testname="Constant Throughput Timer" enabled="true">
+            <stringProp name="throughput">${__groovy(${p_transactions_per_min}*0.5,)}</stringProp>
+            <intProp name="calcMode">0</intProp>
+          </ConstantThroughputTimer>
+          <hashTree/>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Response Assertion" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="49586">200</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.custom_message"></stringProp>
+            <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">16</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Bookings">
+        <stringProp name="ThreadGroup.num_threads">${THREADS}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">${RAMP_UP}</stringProp>
+        <stringProp name="ThreadGroup.duration">${TEST_DURATION}</stringProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller">
+          <intProp name="LoopController.loops">-1</intProp>
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+        </elementProp>
+      </ThreadGroup>
+      <hashTree>
+        <OnceOnlyController guiclass="OnceOnlyControllerGui" testclass="OnceOnlyController" testname="Once Only Controller"/>
+        <hashTree>
+          <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POST /login">
+            <stringProp name="HTTPSampler.port">${BOOKING_PORT}</stringProp>
+            <stringProp name="HTTPSampler.path">${path_login}</stringProp>
+            <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+            <stringProp name="HTTPSampler.method">POST</stringProp>
+            <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+            <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+            <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+              <collectionProp name="Arguments.arguments">
+                <elementProp name="" elementType="HTTPArgument">
+                  <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                  <stringProp name="Argument.value">{&#xd;
+  &quot;phone&quot;: &quot;${CUST_PHONE}&quot;,&#xd;
+  &quot;password&quot;: &quot;${CUST_PASSWORD}&quot;&#xd;
+}</stringProp>
+                  <stringProp name="Argument.metadata">=</stringProp>
+                </elementProp>
+              </collectionProp>
+            </elementProp>
+          </HTTPSamplerProxy>
+          <hashTree>
+            <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="JSON Extractor">
+              <stringProp name="JSONPostProcessor.referenceNames">token</stringProp>
+              <stringProp name="JSONPostProcessor.jsonPathExprs">$.accessToken</stringProp>
+              <stringProp name="JSONPostProcessor.match_numbers"></stringProp>
+            </JSONPostProcessor>
+            <hashTree/>
+            <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="JSR223 PostProcessor" enabled="true">
+              <stringProp name="scriptLanguage">groovy</stringProp>
+              <stringProp name="parameters"></stringProp>
+              <stringProp name="filename"></stringProp>
+              <stringProp name="cacheKey">true</stringProp>
+              <stringProp name="script">vars.put(&quot;tokenTimeStamp&quot;, System.currentTimeMillis().toString())</stringProp>
+            </JSR223PostProcessor>
+            <hashTree/>
+          </hashTree>
+        </hashTree>
+        <WhileController guiclass="WhileControllerGui" testclass="WhileController" testname="While Controller" enabled="true">
+          <stringProp name="WhileController.condition">${__groovy(System.currentTimeMillis() - Long.parseLong(vars.get(&quot;tokenTimeStamp&quot;)) &gt;= 900000,)}</stringProp>
+        </WhileController>
+        <hashTree>
+          <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POST /login" enabled="true">
+            <stringProp name="HTTPSampler.port">${BOOKING_PORT}</stringProp>
+            <stringProp name="HTTPSampler.path">${path_login}</stringProp>
+            <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+            <stringProp name="HTTPSampler.method">POST</stringProp>
+            <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+            <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+            <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+              <collectionProp name="Arguments.arguments">
+                <elementProp name="" elementType="HTTPArgument">
+                  <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                  <stringProp name="Argument.value">{&#xd;
+  &quot;phone&quot;: &quot;${CUST_PHONE}&quot;,&#xd;
+  &quot;password&quot;: &quot;${CUST_PASSWORD}&quot;&#xd;
+}</stringProp>
+                  <stringProp name="Argument.metadata">=</stringProp>
+                </elementProp>
+              </collectionProp>
+            </elementProp>
+          </HTTPSamplerProxy>
+          <hashTree>
+            <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="JSON Extractor" enabled="true">
+              <stringProp name="JSONPostProcessor.referenceNames">token</stringProp>
+              <stringProp name="JSONPostProcessor.jsonPathExprs">$.accessToken</stringProp>
+              <stringProp name="JSONPostProcessor.match_numbers"></stringProp>
+            </JSONPostProcessor>
+            <hashTree/>
+            <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="JSR223 PostProcessor" enabled="true">
+              <stringProp name="scriptLanguage">groovy</stringProp>
+              <stringProp name="parameters"></stringProp>
+              <stringProp name="filename"></stringProp>
+              <stringProp name="cacheKey">true</stringProp>
+              <stringProp name="script">vars.put(&quot;tokenTimeStamp&quot;, System.currentTimeMillis().toString())</stringProp>
+            </JSR223PostProcessor>
+            <hashTree/>
+          </hashTree>
+        </hashTree>
+        <GenericController guiclass="LogicControllerGui" testclass="GenericController" testname="Simple Controller"/>
+        <hashTree>
+          <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POST /api/v1/bookings">
+            <stringProp name="HTTPSampler.port">${BOOKING_PORT}</stringProp>
+            <stringProp name="HTTPSampler.path">${path_bookings}</stringProp>
+            <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+            <stringProp name="HTTPSampler.method">POST</stringProp>
+            <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+            <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+            <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+              <collectionProp name="Arguments.arguments">
+                <elementProp name="" elementType="HTTPArgument">
+                  <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                  <stringProp name="Argument.value">{&#xd;
+  &quot;toyId&quot;: &quot;${toyId}&quot;,&#xd;
+  &quot;startDate&quot;: &quot;${__timeShift(yyyy-MM-dd,,P3D,,)}&quot;,&#xd;
+  &quot;endDate&quot;: &quot;${__timeShift(yyyy-MM-dd,,P10D,,)}&quot;,&#xd;
+  &quot;rentalType&quot;: &quot;WEEKLY&quot;,&#xd;
+  &quot;deliveryFlat&quot;: &quot;B-204&quot;,&#xd;
+  &quot;deliveryBuilding&quot;: &quot;Neelkanth Heights&quot;,&#xd;
+  &quot;deliveryArea&quot;: &quot;Kharghar&quot;,&#xd;
+  &quot;deliveryCity&quot;: &quot;Navi Mumbai&quot;,&#xd;
+  &quot;deliveryPincode&quot;: &quot;410210&quot;&#xd;
+}</stringProp>
+                  <stringProp name="Argument.metadata">=</stringProp>
+                </elementProp>
+              </collectionProp>
+            </elementProp>
+          </HTTPSamplerProxy>
+          <hashTree>
+            <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header Manager">
+              <collectionProp name="HeaderManager.headers">
+                <elementProp name="" elementType="Header">
+                  <stringProp name="Header.name">Authorization</stringProp>
+                  <stringProp name="Header.value">Bearer ${token}</stringProp>
+                </elementProp>
+              </collectionProp>
+            </HeaderManager>
+            <hashTree/>
+            <ConstantThroughputTimer guiclass="TestBeanGUI" testclass="ConstantThroughputTimer" testname="Constant Throughput Timer">
+              <stringProp name="throughput">${__groovy(${p_transactions_per_min}*0.2,)}</stringProp>
+              <intProp name="calcMode">0</intProp>
+            </ConstantThroughputTimer>
+            <hashTree/>
+            <JSR223Assertion guiclass="TestBeanGUI" testclass="JSR223Assertion" testname="JSR223 Assertion" enabled="false">
+              <stringProp name="cacheKey">true</stringProp>
+              <stringProp name="filename"></stringProp>
+              <stringProp name="parameters"></stringProp>
+              <stringProp name="script">def responseCode = prev.getResponseCode()
+
+if(responseCode == &apos;200&apos; || responseCode == &apos;409&apos;){
+	AssertionResult.setFailure(false)
+	}
+else{
+	AssertionResult.setFailure(true)
+	AssertionResult.setFailureMessage(&quot;Expected 200 or 409, but got : &quot;+ responseCode)
+}</stringProp>
+              <stringProp name="scriptLanguage">groovy</stringProp>
+            </JSR223Assertion>
+            <hashTree/>
+            <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Response Assertion">
+              <collectionProp name="Asserion.test_strings">
+                <stringProp name="1034362693">^(201|409)$</stringProp>
+              </collectionProp>
+              <stringProp name="Assertion.custom_message"></stringProp>
+              <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+              <boolProp name="Assertion.assume_success">true</boolProp>
+              <intProp name="Assertion.test_type">1</intProp>
+            </ResponseAssertion>
+            <hashTree/>
+          </hashTree>
+        </hashTree>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

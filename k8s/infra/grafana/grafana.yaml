@@ -30,6 +30,7 @@ data:
     datasources:
       - name: Prometheus
         type: prometheus
+        uid: PBFA97CFB590B2093
         access: proxy
         url: http://prometheus.monitoring.svc.cluster.local:9090
         isDefault: true
@@ -113,7 +114,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -169,7 +170,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "up{job=~\"toy-service|booking-service|api-gateway\"}",
               "legendFormat": "{{job}}",
@@ -189,7 +190,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -264,7 +265,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (job) (rate(http_server_requests_seconds_count[5m]))",
               "legendFormat": "{{job}}",
@@ -284,7 +285,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -359,7 +360,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (job) (rate(http_server_requests_seconds_count{status=~\"5..\"}[5m]))",
               "legendFormat": "{{job}}",
@@ -392,7 +393,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -467,7 +468,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (rental_type) (rate(booking_created_total[5m]))",
               "legendFormat": "{{rental_type}}",
@@ -487,7 +488,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -562,7 +563,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum(rate(booking_conflict_total[5m]))",
               "legendFormat": "conflicts/sec",
@@ -582,7 +583,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -657,7 +658,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (method) (rate(payment_success_total[5m]))",
               "legendFormat": "success: {{method}}",
@@ -666,7 +667,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (reason) (rate(payment_failed_total[5m]))",
               "legendFormat": "failed: {{reason}}",
@@ -686,7 +687,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -761,7 +762,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (type) (rate(pdf_generation_duration_seconds_sum[5m])) / sum by (type) (rate(pdf_generation_duration_seconds_count[5m]))",
               "legendFormat": "{{type}}",
@@ -781,7 +782,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -856,7 +857,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (status) (increase(monthly_report_generated_total[1h]))",
               "legendFormat": "{{status}}",
@@ -876,7 +877,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "description": "toy_availability_cache_hit_total / (hit + miss) — a cold cache after a Couchbase restart shows this collapse toward 0 (Sprint 7's cache-warming bottleneck).",
           "fieldConfig": {
@@ -954,7 +955,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum(rate(toy_availability_cache_hit_total[5m])) / (sum(rate(toy_availability_cache_hit_total[5m])) + sum(rate(toy_availability_cache_miss_total[5m])))",
               "legendFormat": "hit ratio",
@@ -987,7 +988,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1066,7 +1067,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
               "exemplar": false,
@@ -1090,7 +1091,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1169,7 +1170,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
               "exemplar": false,
@@ -1193,7 +1194,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1272,7 +1273,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
               "exemplar": false,
@@ -1296,7 +1297,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1375,7 +1376,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
               "exemplar": false,
@@ -1412,7 +1413,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1491,7 +1492,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (job) (jvm_memory_used_bytes{area=\"heap\"})",
               "legendFormat": "{{job}}",
@@ -1511,7 +1512,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1590,7 +1591,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
               "expr": "sum by (job) (jvm_memory_used_bytes{area=\"nonheap\"})",
@@ -1612,7 +1613,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1690,7 +1691,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
               "expr": "avg by (job) (process_cpu_usage{job=~\"api-gateway|toy-service|booking-service\"}) * 100",
@@ -1712,7 +1713,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1790,7 +1791,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "editorMode": "code",
               "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"toy-rental\", container!=\"\"}[5m]))",
@@ -1825,7 +1826,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "description": "Single-partition topics (deliberate Sprint 7 bottleneck) — watch this climb under load before that fix lands.",
           "fieldConfig": {
@@ -1901,7 +1902,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "kafka_consumer_fetch_manager_records_lag_max",
               "legendFormat": "{{job}} {{client_id}}",
@@ -1921,7 +1922,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1996,7 +1997,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (group, topic) (kafka_consumergroup_group_lag)",
               "legendFormat": "{{group}} / {{topic}}",
@@ -2017,7 +2018,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -2092,7 +2093,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (topic) (kafka_partition_latest_offset - kafka_partition_earliest_offset)",
               "legendFormat": "{{topic}}",
@@ -2112,7 +2113,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -2187,7 +2188,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (job, topic) (rate(kafka_consumer_fetch_manager_records_consumed_total[5m]))",
               "legendFormat": "{{job}} {{topic}}",
@@ -2220,7 +2221,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -2277,7 +2278,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "pg_up",
               "legendFormat": "postgres",
@@ -2297,7 +2298,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -2372,7 +2373,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "pg_stat_database_numbackends{datname=~\"toydb|bookingdb\"}",
               "legendFormat": "{{datname}}",
@@ -2392,7 +2393,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -2467,7 +2468,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "pg_database_size_bytes{datname=~\"toydb|bookingdb\"}",
               "legendFormat": "{{datname}}",
@@ -2487,7 +2488,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -2562,7 +2563,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (datname) (rate(pg_stat_database_xact_commit{datname=~\"toydb|bookingdb\"}[5m]))",
               "legendFormat": "{{datname}} commit",
@@ -2571,7 +2572,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (datname) (rate(pg_stat_database_xact_rollback{datname=~\"toydb|bookingdb\"}[5m]))",
               "legendFormat": "{{datname}} rollback",
@@ -2591,7 +2592,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -2666,7 +2667,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum by (datname) (rate(pg_stat_database_blks_hit{datname=~\"toydb|bookingdb\"}[5m])) / (sum by (datname) (rate(pg_stat_database_blks_hit{datname=~\"toydb|bookingdb\"}[5m])) + sum by (datname) (rate(pg_stat_database_blks_read{datname=~\"toydb|bookingdb\"}[5m])))",
               "legendFormat": "{{datname}}",
@@ -2700,7 +2701,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -2775,7 +2776,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum(rate(kv_cmd_lookup[5m]))",
               "legendFormat": "reads",
@@ -2784,7 +2785,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum(rate(kv_cmd_mutation[5m]))",
               "legendFormat": "writes",
@@ -2804,7 +2805,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -2879,7 +2880,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "kv_curr_connections",
               "legendFormat": "connections",
@@ -2899,7 +2900,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -2974,7 +2975,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "kv_curr_items",
               "legendFormat": "{{bucket}}",
@@ -2994,7 +2995,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -3069,7 +3070,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "couch_docs_actual_disk_size",
               "legendFormat": "{{bucket}}",

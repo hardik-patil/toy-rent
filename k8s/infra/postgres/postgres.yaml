@@ -70,6 +70,11 @@ spec:
       containers:
         - name: postgres
           image: postgres:15
+          # Server-wide default timezone (CLAUDE.md's documented convention — all
+          # timestamps are Asia/Kolkata/IST), applies to every database on this
+          # instance (toydb, bookingdb, and the default postgres db), not just the
+          # ones seeded today. Postgres image default is UTC otherwise.
+          args: ["-c", "timezone=Asia/Kolkata"]
           ports:
             - containerPort: 5432
           env:
