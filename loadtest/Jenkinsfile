@@ -1,0 +1,65 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'TEST_LEVEL', choices: ['smoke', 'expected'], description: 'Which SLOs.md tier to run/gate against')
+        string(name: 'THREADS',       defaultValue: '5',  description: 'Concurrent virtual users')
+        string(name: 'RAMP_UP',       defaultValue: '10', description: 'Ramp-up seconds')
+        string(name: 'TEST_DURATION', defaultValue: '90', description: 'Scheduler duration, seconds')
+        string(name: 'TPS',           defaultValue: '5',  description: 'Target throughput')
+    }
+
+    environment {
+        RESULTS_DIR = "loadtest/results/${env.BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Prepare results dir') {
+            steps {
+                sh "mkdir -p ${RESULTS_DIR}"
+            }
+        }
+
+        stage('Run JMeter (non-GUI)') {
+            steps {
+                sh """
+                    /opt/jmeter/bin/jmeter -n \
+                        -t loadtest/Regression_toyRental.jmx \
+                        -JHOST=host.docker.internal -JTOY_PORT=8081 -JBOOKING_PORT=8082 \
+                        -JTHREADS=${params.THREADS} -JRAMP_UP=${params.RAMP_UP} \
+                        -JTEST_DURATION=${params.TEST_DURATION} -JTPS=${params.TPS} \
+                        -l ${RESULTS_DIR}/result.jtl \
+                        -e -o ${RESULTS_DIR}/html-report
+                """
+            }
+        }
+
+        stage('Performance gate') {
+            steps {
+                perfReport sourceDataFiles: "${RESULTS_DIR}/result.jtl",
+                    errorFailedThreshold: 20,
+                    errorUnstableThreshold: 5
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: "${RESULTS_DIR}/result.jtl", allowEmptyArchive: true
+            publishHTML(target: [
+                reportName: 'JMeter Dashboard',
+                reportDir:  "${RESULTS_DIR}/html-report",
+                reportFiles: 'index.html',
+                keepAll: true,
+                alwaysLinkToLastBuild: true,
+                allowMissing: true
+            ])
+        }
+    }
+}
