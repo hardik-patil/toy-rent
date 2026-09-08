@@ -25,6 +25,11 @@ pipeline {
         // which reaches the host's kubectl port-forwards via host.docker.internal (same as JMeter's -JHOST).
         TOY_BASE_URL     = "http://host.docker.internal:8081"
         BOOKING_BASE_URL = "http://host.docker.internal:8082"
+        // Resolve the param to a real env var here (Groovy side) so the `sh` block can use
+        // $PYTEST_MARKERS under `set -u`. Parameters are NOT auto-exported to shell steps,
+        // and on the very first build after this param is added params.PYTEST_MARKERS is
+        // still null — the ?: fallback covers both cases.
+        PYTEST_MARKERS = "${params.PYTEST_MARKERS ?: 'not e2e and not admin'}"
     }
 
     options {
