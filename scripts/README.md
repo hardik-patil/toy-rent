@@ -90,6 +90,52 @@ python scripts/startup.py --stop-port-forward      # kill forwards this script s
 
 ---
 
+## application_status.py
+
+A read-only "**is the stack up or down?**" check. Queries the cluster (never changes it),
+prints a per-workload table, and exits with a code you can branch on. It's the standalone
+version of `startup.py --verify`'s first section, plus infra/monitoring coverage.
+
+### What it checks
+
+`Deployment`s **and** `StatefulSet`s in three namespaces — each is `UP` only when
+`status.readyReplicas == spec.replicas` and `>= 1`:
+
+| group | namespace | workloads |
+|---|---|---|
+| app | `toy-rental` | `api-gateway`, `toy-service`, `booking-service` |
+| infra | `infra` | `postgres`, `kafka`, `minio`, `couchbase`, `keycloak`, `redis`, `wiremock`, `postgres-exporter`, `kafka-lag-exporter` |
+| monitoring | `monitoring` | `grafana`, `prometheus`, `zipkin` |
+
+Per-workload state is one of `UP` / `PARTIAL` (some replicas ready) / `DOWN` (wanted, none
+ready) / `STOPPED` (scaled to 0) / `MISSING` (not deployed).
+
+### Exit codes
+
+| code | verdict | meaning |
+|---|---|---|
+| 0 | `ALL UP` | every checked workload fully Ready |
+| 1 | `DEGRADED` | some up, some not — a partial bring-up or a crash |
+| 2 | `STOPPED` | every checked workload scaled to 0 (the `SHUTDOWN.md` state) |
+| 2 | `DOWN` | nothing Ready and it isn't a clean stop |
+| 3 | — | `kubectl` missing, or `kubectl cluster-info` fails |
+
+### How to run
+
+```bash
+python scripts/application_status.py             # all three groups + verdict
+python scripts/application_status.py --app-only  # just the 3 app services
+python scripts/application_status.py --http      # also GET /actuator/health on :8081/:8082
+python scripts/application_status.py --quiet     # verdict line + exit code only (for scripts/CI)
+```
+
+`--http` needs the port-forwards up (`startup.py --port-forward`); a failed probe with
+otherwise-Ready pods downgrades the verdict to `DEGRADED`. Like the others: `kubectl` on
+PATH, Python 3.7+, standard library only. Does **not** check Jenkins or the frontend dev
+server.
+
+---
+
 ## enable_new_relic.py
 
 Patches a real New Relic license key into the cluster and re-enables the New Relic Java
