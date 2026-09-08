@@ -7,10 +7,29 @@ pipeline {
         string(name: 'RAMP_UP',       defaultValue: '10', description: 'Ramp-up seconds')
         string(name: 'TEST_DURATION', defaultValue: '90', description: 'Scheduler duration, seconds')
         string(name: 'TPS',           defaultValue: '5',  description: 'Target throughput')
+
+        // --- API functional gate (tests/ pytest suite) ---
+        booleanParam(name: 'RUN_API_TESTS', defaultValue: true,
+                     description: 'Run the tests/ pytest functional suite as a gate before the load run. ' +
+                                  'If it fails, JMeter does not run.')
+        string(name: 'PYTEST_MARKERS', defaultValue: 'not e2e and not admin',
+               description: "pytest -m expression for the gate. 'not admin' skips the toy-service admin " +
+                            "tests that flake on the booking-service multi-replica JWT keypair mismatch " +
+                            "(see tests/README.md). Use 'smoke' for a fast sanity gate, 'not e2e' for full.")
     }
 
     environment {
         RESULTS_DIR = "loadtest/results/${env.BUILD_NUMBER}"
+        VENV        = "${env.WORKSPACE}/.venv-ci"
+        // tests/conftest.py reads these; its localhost defaults are wrong inside the Jenkins container,
+        // which reaches the host's kubectl port-forwards via host.docker.internal (same as JMeter's -JHOST).
+        TOY_BASE_URL     = "http://host.docker.internal:8081"
+        BOOKING_BASE_URL = "http://host.docker.internal:8082"
+    }
+
+    options {
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
     }
 
     stages {
@@ -34,6 +53,40 @@ pipeline {
         stage('Prepare results dir') {
             steps {
                 sh "mkdir -p ${RESULTS_DIR}"
+            }
+        }
+
+        stage('API functional tests (pytest gate)') {
+            when { expression { params.RUN_API_TESTS } }
+            steps {
+                // Needs python3 in the Jenkins image — see docker/jenkins/Dockerfile.
+                sh '''
+                    set -eu
+
+                    python3 -m venv "$VENV"
+                    "$VENV/bin/pip" install --quiet --upgrade pip
+                    "$VENV/bin/pip" install --quiet -r tests/requirements.txt
+
+                    # Explicit reachability check. The suite's own health-gate would
+                    # otherwise SKIP (a green result) when a service is down, which is
+                    # useless as a gate — we want a hard failure with the fix instructions.
+                    for pair in "toy-service|$TOY_BASE_URL" "booking-service|$BOOKING_BASE_URL"; do
+                        name=${pair%%|*}; url=${pair#*|}
+                        code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url/actuator/health" || echo 000)
+                        echo "$name  $url/actuator/health -> $code"
+                        if [ "$code" != "200" ]; then
+                            echo ""
+                            echo "$name not reachable from the Jenkins container."
+                            echo "Start the host port-forwards, then re-run:"
+                            echo "  kubectl port-forward -n toy-rental svc/toy-service     8081:8081"
+                            echo "  kubectl port-forward -n toy-rental svc/booking-service 8082:8082"
+                            exit 1
+                        fi
+                    done
+
+                    "$VENV/bin/pytest" tests -m "$PYTEST_MARKERS" -ra \
+                        --junitxml="$RESULTS_DIR/pytest-junit.xml"
+                '''
             }
         }
 
@@ -62,7 +115,9 @@ pipeline {
 
     post {
         always {
+            junit testResults: "${RESULTS_DIR}/pytest-junit.xml", allowEmptyResults: true
             archiveArtifacts artifacts: "${RESULTS_DIR}/result.jtl", allowEmptyArchive: true
+            archiveArtifacts artifacts: "${RESULTS_DIR}/pytest-junit.xml", allowEmptyArchive: true
             publishHTML(target: [
                 reportName: 'JMeter Dashboard',
                 reportDir:  "${RESULTS_DIR}/html-report",
