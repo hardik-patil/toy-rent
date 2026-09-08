@@ -1,0 +1,8 @@
+# Dependencies for the black-box API test suite (tests/). Dev-only — bump freely.
+# This is the repo's first pip-installed test dependency; the "standard library
+# only" rule in learning/ops-scripts-fundamentals.md is scoped to the ops scripts
+# in scripts/, not this batch-run suite. `requests` is used only inside
+# tests/helpers.py::ApiClient.
+pytest==8.3.4
+requests==2.32.3
+pytest-timeout==2.3.1
