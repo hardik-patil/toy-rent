@@ -22,7 +22,9 @@ apiGateway:
       cpu: 200m
       memory: 256Mi
     limits:
-      cpu: 500m
+      # Raised from 500m: the New Relic-instrumented JVM was CPU-starved under
+      # 500m, making the actuator health handler miss the probe deadline.
+      cpu: 750m
       memory: 512Mi
   hpa:
     enabled: true
@@ -88,14 +90,22 @@ logging:
   level: DEBUG
 
 probes:
+  # timeoutSeconds/failureThreshold raised from the k8s defaults (1s / 3): the
+  # New Relic-instrumented JVMs intermittently take >1s to answer the actuator
+  # health endpoint under their CPU limits, which was killing api-gateway (exit
+  # 143) and restart-looping it. More lenient values are safe for all 3 services.
   liveness:
     path: /actuator/health/liveness
     initialDelaySeconds: 150
     periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 5
   readiness:
     path: /actuator/health/readiness
     initialDelaySeconds: 120
     periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 5
 
 # Dev-only credentials matching docker-compose.yml's existing plaintext
 # defaults (see application.yml's ${POSTGRES_PASSWORD:toypass} fallbacks).
