@@ -47,20 +47,37 @@ with a *full JDK* to the target pod, sharing just that one container's process n
    awk '/^Uid:/{print $2}' /proc/<PID>/status   # numeric uid, e.g. 1000
    ```
 
-   **The debug container is root, but all three services run their JVM as `uid 1000`
-   (`USER toyrental` in every Dockerfile).** HotSpot's dynamic attach checks that the
-   `.attach_pid<n>` trigger file is owned by the *target JVM's own uid* before it will
-   answer — so a root `jcmd` against a uid-1000 JVM fails with:
+   Cross-container attach here has **two** obstacles, and you hit this
+   `AttachNotSupportedException` until both are solved:
    ```
    com.sun.tools.attach.AttachNotSupportedException: Unable to open socket file
    /tmp/.java_pid1: target process 1 doesn't respond within 10500ms or HotSpot VM not loaded
    ```
-   The fix is to run `jcmd` as that uid. `eclipse-temurin:17-jdk-jammy` ships `setpriv`:
+
+   **(a) UID.** The debug container is root, but all three services run their JVM as
+   `uid 1000` (`USER toyrental` in every Dockerfile). The attach socket is mode `0600`
+   and the JVM only honours a trigger file it owns — so `jcmd` must run as that uid.
+   `eclipse-temurin:17-jdk-jammy` ships `setpriv`:
    ```bash
-   JC="setpriv --reuid=1000 --regid=999 --clear-groups jcmd"
+   SP="setpriv --reuid=1000 --regid=999 --clear-groups"
    ```
-   (`scripts/capture_diagnostics.py` now does this automatically — it reads the target's
-   Uid/Gid from `/proc/$PID/status` and wraps every `jcmd` in `setpriv`.)
+
+   **(b) Socket path across mount namespaces.** The JVM creates `/tmp/.java_pid1` in
+   *its* mount namespace; `jcmd` in the debug container looks in *its own* `/tmp`. JDK 17
+   normally falls back to `/proc/<pid>/root/tmp/` — but not when `--target` makes the
+   shared pid literally `1` (it thinks same namespace). Prime the listener, then symlink
+   the real socket into place:
+   ```bash
+   SOCK=/proc/1/root/tmp/.java_pid1
+   [ -S "$SOCK" ] || { $SP sh -c 'touch /proc/1/root/tmp/.attach_pid1; kill -QUIT 1'; \
+                       while [ ! -S "$SOCK" ]; do sleep 0.5; done; }
+   ln -sf "$SOCK" /tmp/.java_pid1
+   JC="$SP jcmd"          # now attaches
+   ```
+
+   `scripts/capture_diagnostics.py` does all of this automatically (reads Uid/Gid from
+   `/proc/$PID/status`, primes + symlinks the socket, wraps every `jcmd` in `setpriv`).
+   Verified end-to-end: JFR + a 194 MB heap dump captured from a live pod.
 
 4. Start the recording (writes into the **target container's** filesystem, not the debug
    container's):

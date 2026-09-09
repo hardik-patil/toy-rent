@@ -125,29 +125,46 @@ def build_remote_script(duration_s, jfr_settings, do_jfr, do_heap, heap_all,
         # belt-and-braces.
         "PID=$(jcmd -l 2>/dev/null | grep '\\.jar' | grep -v sun.tools.jcmd | awk 'NR==1{print $1}')",
         'if [ -z "${PID:-}" ]; then echo "[cap] ERROR: no .jar JVM found"; jcmd -l || true; exit 1; fi',
-        # HotSpot's dynamic attach requires the caller's euid to match the target
-        # JVM's - being root in the ephemeral container is NOT enough across
-        # containers, because the JVM checks that the .attach_pid<n> trigger file
-        # is owned by its own uid before it will answer. The repo's services run
-        # as uid 1000 (USER toyrental), so run every jcmd as that uid via setpriv.
+        # Cross-container HotSpot attach has two obstacles here:
+        #  1. The app JVM runs as a non-root uid (USER toyrental = 1000). Its attach
+        #     socket is mode 0600, and it only answers a trigger file it owns - so
+        #     jcmd must run as that uid, not as the ephemeral container's root.
+        #  2. The JVM creates its socket at /tmp/.java_pid<pid> in ITS mount
+        #     namespace; jcmd here looks in the ephemeral container's own /tmp.
+        #     JDK 17 skips its /proc/<pid>/root/ fallback when --target makes the
+        #     shared pid literally 1. So prime the listener, then symlink the real
+        #     socket to where jcmd expects it.
         "TUID=$(awk '/^Uid:/{print $2}' /proc/$PID/status 2>/dev/null || echo 0)",
         "TGID=$(awk '/^Gid:/{print $2}' /proc/$PID/status 2>/dev/null || echo 0)",
         'echo "[cap] target PID=$PID uid=$TUID gid=$TGID"',
-        'if [ "$TUID" != "0" ] && command -v setpriv >/dev/null 2>&1; then',
-        '  JC="setpriv --reuid=$TUID --regid=$TGID --clear-groups jcmd"',
-        '  echo "[cap] running jcmd as uid $TUID (setpriv)"',
-        'elif [ "$TUID" != "0" ]; then',
-        '  echo "[cap] WARNING: target runs as uid $TUID but setpriv is missing - attach may fail"',
-        '  JC="jcmd"',
-        'else',
-        '  JC="jcmd"',
+        'SP=""',
+        'if [ "$TUID" != "0" ]; then',
+        '  if command -v setpriv >/dev/null 2>&1; then',
+        '    SP="setpriv --reuid=$TUID --regid=$TGID --clear-groups"',
+        '    echo "[cap] running jcmd as uid $TUID (setpriv)"',
+        '  else',
+        '    echo "[cap] WARNING: target runs as uid $TUID but setpriv is missing - attach may fail"',
+        '  fi',
         'fi',
+        'JC="$SP jcmd"',
+        'SOCK="/proc/$PID/root/tmp/.java_pid$PID"',
+        'if [ ! -S "$SOCK" ]; then',
+        '  echo "[cap] priming attach listener (touch .attach_pid$PID + SIGQUIT)"',
+        '  $SP sh -c "touch /proc/$PID/root/tmp/.attach_pid$PID 2>/dev/null; kill -QUIT $PID" || true',
+        '  n=0; while [ ! -S "$SOCK" ] && [ "$n" -lt 20 ]; do sleep 0.5; n=$((n+1)); done',
+        'fi',
+        'ln -sf "$SOCK" "/tmp/.java_pid$PID"',
+        '[ -S "$SOCK" ] || echo "[cap] WARNING: attach socket $SOCK still absent - jcmd may fail"',
     ]
 
     if do_jfr:
+        # duration= is only a safety net (self-stops if this script's session
+        # drops); it's set well past our own window so the explicit JFR.stop
+        # below wins the race and flushes the file cleanly. Without the margin,
+        # JFR.stop races the JVM's own timer -> "Could not stop recording".
         L += [
-            f'echo "[cap] JFR.start duration={duration_s}s settings={jfr_settings}"',
-            f'$JC "$PID" JFR.start name=capture duration={duration_s}s '
+            f'echo "[cap] JFR.start window={duration_s}s settings={jfr_settings}"',
+            f'$JC "$PID" JFR.start name=capture duration={duration_s + 120}s '
             f'filename={REMOTE_JFR} settings={jfr_settings}',
         ]
 
