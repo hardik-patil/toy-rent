@@ -1194,7 +1194,11 @@ Claude Code must NOT pre-fix these. They are found via JMeter tests.
 ```
 1. Missing composite index on toys(category, age_group, is_active, status)
    → Will cause full table scan under catalogue browse load
-   → Fix applied in Sprint 7 after JMeter proves the problem
+   → ✅ FIXED 2026-09-09: proven via a New Relic trace (multi-second
+     HikariDataSource.getConnection on GET /toys/{toyId} — pool starved by slow
+     unindexed browse queries over the 50k-row toys table). Added
+     V6__add_toys_browse_index.sql. See
+     learning/hikari-pool-exhaustion-toys-browse.md.
 
 2. No cache warming on Couchbase startup
    → Cold start stampede when Couchbase restarts
@@ -1203,7 +1207,11 @@ Claude Code must NOT pre-fix these. They are found via JMeter tests.
 
 3. HikariCP pool too small (initial: maximumPoolSize=10)
    → Pool exhaustion under concurrent booking load
-   → Fix: increase to 30 after JMeter proves exhaustion
+   → ✅ FIXED 2026-09-09 for toy-service (same investigation as #1): 20 → 30,
+     minimum-idle 5 → 10 in toy-service/application.yml, plus Postgres
+     max_connections 100 → 200 (k8s/infra/postgres + docker-compose) so the
+     bigger pools × replicas fit. booking-service was already 30. See
+     learning/hikari-pool-exhaustion-toys-browse.md.
 
 4. Kafka: 1 partition per topic initially
    → Notification service lags under 1000 rapid bookings

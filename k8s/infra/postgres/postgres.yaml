@@ -70,11 +70,18 @@ spec:
       containers:
         - name: postgres
           image: postgres:15
-          # Server-wide default timezone (CLAUDE.md's documented convention — all
-          # timestamps are Asia/Kolkata/IST), applies to every database on this
-          # instance (toydb, bookingdb, and the default postgres db), not just the
-          # ones seeded today. Postgres image default is UTC otherwise.
-          args: ["-c", "timezone=Asia/Kolkata"]
+          # -c flags are appended to the `postgres` server command by the image's
+          # entrypoint (they win over any postgresql.conf).
+          #  * timezone: CLAUDE.md convention — all timestamps are Asia/Kolkata/IST
+          #    (Postgres image default is UTC). Applies to every DB on this instance.
+          #  * max_connections: raised from the default 100. The app pools alone can
+          #    demand toy-service(30) + booking-service(30), each x up to its HPA
+          #    max replicas, plus exporters/keycloak — 100 is hit on any scale-up,
+          #    surfacing as "FATAL: sorry, too many clients already". 200 gives
+          #    headroom on this single-node dev box (Postgres has no memory limit
+          #    set here). NOT reloadable — a pod restart is required to apply it.
+          #    See learning/hikari-pool-exhaustion-toys-browse.md.
+          args: ["-c", "timezone=Asia/Kolkata", "-c", "max_connections=200"]
           ports:
             - containerPort: 5432
           env:

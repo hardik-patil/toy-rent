@@ -6,6 +6,10 @@ services:
     image: postgres:15
     container_name: toyrental-postgres
     restart: unless-stopped
+    # Kept in sync with k8s/infra/postgres/postgres.yaml's args: server timezone
+    # (IST, per CLAUDE.md) and max_connections raised from the default 100 so the
+    # app connection pools x replicas don't hit "too many clients".
+    command: ["-c", "timezone=Asia/Kolkata", "-c", "max_connections=200"]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

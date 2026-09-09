@@ -13,8 +13,16 @@ spring:
     username: ${POSTGRES_USER:toyuser}
     password: ${POSTGRES_PASSWORD:toypass}
     hikari:
-      maximum-pool-size: 20
-      minimum-idle: 5
+      # Bottleneck #3 fix: 20 was too small for concurrent catalogue load - once
+      # browse holds each connection ~300ms (large toys table, JVM CPU-throttled)
+      # the pool exhausts and getConnection queues for seconds. minimum-idle
+      # raised too so a traffic spike isn't gated on ~280ms-per-connection warmup.
+      # Needs Postgres max_connections headroom: this pool x replicas + booking's
+      # pool x replicas + infra must stay under it (raised to 200, see
+      # k8s/infra/postgres/postgres.yaml). See
+      # learning/hikari-pool-exhaustion-toys-browse.md.
+      maximum-pool-size: 30
+      minimum-idle: 10
       connection-timeout: 30000
       idle-timeout: 600000
   jpa:
