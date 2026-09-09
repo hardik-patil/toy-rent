@@ -286,15 +286,22 @@ def pending_booking(fresh_customer, toy_client, config):
 
     client = fresh_customer["client"]
     last = None
-    for _ in range(20):
+    attempts = 40
+    for i in range(attempts):
         toy_id = _random.choice(SEED_TOY_IDS)
         start, end = spread_date_range(config.booking_start_offset_days)
 
-        avail = toy_client.get(
-            f"/api/v1/toys/{toy_id}/availability", params={"from": start, "to": end}
-        )
-        if avail.status_code == 200 and avail.json().get("available") is not True:
-            continue
+        # The availability pre-check is only a hint - it skips obviously-blocked
+        # windows fast. But a saturated / unreachable Couchbase can report
+        # available:false for everything, so for the last few attempts stop
+        # trusting it and just POST (the 201/409 from the create call is the
+        # real signal). Without this, a bad Couchbase = "Last response: n/a".
+        if i < attempts - 8:
+            avail = toy_client.get(
+                f"/api/v1/toys/{toy_id}/availability", params={"from": start, "to": end}
+            )
+            if avail.status_code == 200 and avail.json().get("available") is not True:
+                continue
 
         body = {
             "toyId": toy_id,
@@ -324,8 +331,9 @@ def pending_booking(fresh_customer, toy_client, config):
             "end": end,
         }
     raise AssertionError(
-        "could not create a PENDING booking after 20 tries — every seed toy's "
-        f"windows are blocked. Last response: "
+        f"could not create a PENDING booking after {attempts} tries — every seed toy's "
+        f"windows are blocked (accumulated CONFIRMED bookings, or Couchbase availability "
+        f"data is stale/unreachable). Last response: "
         f"{last.status_code if last else 'n/a'} {last.text if last else ''}"
     )
 

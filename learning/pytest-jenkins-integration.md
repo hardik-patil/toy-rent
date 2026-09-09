@@ -202,18 +202,36 @@ To soften it (run JMeter anyway, mark the build yellow) wrap the pytest line in
 `true`. Untick it for a pure load run and the stage is skipped entirely — the load
 pipeline keeps its original behaviour on demand.
 
-**`PYTEST_MARKERS` default = `not e2e and not admin`.**
-- `not e2e` — the one end-to-end lifecycle test is slow and wants more Couchbase
+**`PYTEST_MARKERS` default = `smoke or read_only`.**
+The gate went through two iterations:
+
+1. First cut was `not e2e and not admin`. That still runs the **`mutating`** tests —
+   which create customers and bookings in a *shared, accumulating* dev database. Over
+   successive builds the seed toys' date windows fill up with CONFIRMED bookings, and
+   `test_webhook_confirms_booking`'s `pending_booking` fixture eventually can't find a
+   free window and errors (`could not create a PENDING booking after N tries`). A
+   load-test gate should not depend on threading a fresh booking through shared state.
+
+2. Now `smoke or read_only` — the ~56 deterministic tests: health, JWKS, catalogue
+   browse/search/detail, availability *shape*, customer + admin login, `/me`, the
+   six-key error contract, cross-service token acceptance. **Zero writes**, so nothing
+   to accumulate and no dependence on Couchbase availability data. The booking *write*
+   path isn't skipped from coverage — `Run JMeter` hammers it immediately after, with
+   its own `errorFailedThreshold` gate.
+
+Exclusions carried forward for anyone who overrides the param to a wider set:
+- `not e2e` — the end-to-end lifecycle test is slow and wants more Couchbase
   logical-date headroom than a CI box reliably has.
-- `not admin` — the ~15 `test_toy_admin_crud.py` / `test_admin_bookings.py` tests depend
-  on toy-service validating a booking-service-issued admin JWT. **booking-service mints
-  its RSA signing key in memory, per pod.** With 2 replicas the pods have different keys;
-  `kubectl port-forward svc/booking-service` pins login to one pod, but toy-service
-  fetches JWKS through the load-balanced Service and may cache the *other* pod's key →
-  those tests 401 about half the time. This is a real bug the suite surfaced (see
-  `tests/README.md` "Known flakiness"); until it's fixed (shared key from a mounted
-  Secret) the gate excludes those tests so a green build means something. Override the
-  param to `smoke` for a ~5s sanity gate, or `not e2e` once the key is shared.
+- `not admin` — `test_toy_admin_crud.py` / `test_admin_bookings.py` depend on
+  toy-service validating a booking-service-issued admin JWT. **booking-service mints
+  its RSA signing key in memory, per pod.** With 2 replicas the pods have different
+  keys; login pins to one pod (via the port-forward) but toy-service fetches JWKS
+  through the load-balanced Service and may cache the *other* pod's key → those tests
+  401 about half the time. A real bug the suite surfaced (see `tests/README.md`); the
+  fix is a shared key from a mounted Secret.
+
+Override examples: `PYTEST_MARKERS=smoke` for a ~5s sanity gate;
+`PYTEST_MARKERS='not e2e and not admin'` to also run the mutating booking tests.
 
 **venv in `$WORKSPACE/.venv-ci`, rebuilt each run.** ~10s including `pip install`. Simple
 and hermetic. Caching (skip `venv` creation when `.venv-ci/bin/pytest` exists and
@@ -245,7 +263,7 @@ parameters {
     // ... existing THREADS / RAMP_UP / TEST_DURATION / TPS / TEST_LEVEL ...
     booleanParam(name: 'RUN_API_TESTS', defaultValue: true,
                  description: 'Run the tests/ pytest suite as a gate before the load run.')
-    string(name: 'PYTEST_MARKERS', defaultValue: 'not e2e and not admin',
+    string(name: 'PYTEST_MARKERS', defaultValue: 'smoke or read_only',
            description: "pytest -m expression for the gate.")
 }
 environment {
@@ -273,7 +291,7 @@ docker exec jenkins bash -c '
   export VENV=/tmp/dry/.venv-ci RESULTS_DIR=/tmp/dry/results
   export TOY_BASE_URL=http://host.docker.internal:8081
   export BOOKING_BASE_URL=http://host.docker.internal:8082
-  export PYTEST_MARKERS="not e2e and not admin"
+  export PYTEST_MARKERS="smoke or read_only"
   mkdir -p "$RESULTS_DIR"
   python3 -m venv "$VENV"
   "$VENV/bin/pip" install -q -r tests/requirements.txt

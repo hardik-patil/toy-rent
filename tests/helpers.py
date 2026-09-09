@@ -105,7 +105,7 @@ def random_phone():
     return "70" + "".join(str(random.randint(0, 9)) for _ in range(8))
 
 
-def spread_date_range(start_offset_days, rental_type="WEEKLY", horizon_days=300):
+def spread_date_range(start_offset_days, rental_type="WEEKLY", horizon_days=500):
     """
     (start_iso, end_iso) for a booking window that starts at a random day in
     [today + start_offset_days, today + start_offset_days + horizon_days] and

@@ -127,6 +127,15 @@ state, redeploy the DBs or run Flyway `clean` + `migrate`.
 - **`POST /api/v1/bookings` returns 409 for both** "toy not available" and the
   pessimistic-lock overlap. Re-running the same toy + dates yields 409; the fixtures use a
   fresh customer + randomised ranges and retry once.
+- **The seed toys' calendars fill up.** Every CONFIRMED booking blocks a 7-day range on a
+  seed toy, and nothing in the suite releases them. On a long-lived shared DB (e.g. a CI
+  Jenkins hitting the same cluster build after build) the 8 seed toys eventually have no
+  free window, and `pending_booking` fails with *"could not create a PENDING booking after
+  N tries"*. Mitigations in place: a 500-day random horizon, 40 attempts, and the last few
+  attempts POST without trusting the availability pre-check (which also guards against a
+  stale/unreachable Couchbase reporting `available:false` for everything). Real reset:
+  redeploy `bookingdb` / Flyway `clean` + `migrate`. The Jenkins gate sidesteps this
+  entirely by defaulting to `-m "smoke or read_only"` (no writes).
 - **webhook → CONFIRMED is Kafka-driven**, not strictly synchronous. Async assertions use
   `poll_until` bounded by `POLL_TIMEOUT` (default 30s).
 

@@ -22,10 +22,13 @@ pipeline {
         booleanParam(name: 'RUN_API_TESTS', defaultValue: true,
                      description: 'Run the tests/ pytest functional suite as a gate before the load run. ' +
                                   'If it fails, JMeter does not run.')
-        string(name: 'PYTEST_MARKERS', defaultValue: 'not e2e and not admin',
-               description: "pytest -m expression for the gate. 'not admin' skips the toy-service admin " +
-                            "tests that flake on the booking-service multi-replica JWT keypair mismatch " +
-                            "(see tests/README.md). Use 'smoke' for a fast sanity gate, 'not e2e' for full.")
+        string(name: 'PYTEST_MARKERS', defaultValue: 'smoke or read_only',
+               description: "pytest -m expression for the gate. Default 'smoke or read_only' is the " +
+                            "deterministic subset (health, catalogue, search, auth, error contract) - it " +
+                            "creates no bookings, so it doesn't flake on the shared dev DB's accumulated " +
+                            "state or Couchbase availability. JMeter exercises the booking write path " +
+                            "right after. Use 'not e2e and not admin' to also run the mutating booking " +
+                            "tests (see tests/README.md for their known flakiness).")
     }
 
     environment {
@@ -39,7 +42,7 @@ pipeline {
         // $PYTEST_MARKERS under `set -u`. Parameters are NOT auto-exported to shell steps,
         // and on the very first build after this param is added params.PYTEST_MARKERS is
         // still null — the ?: fallback covers both cases.
-        PYTEST_MARKERS = "${params.PYTEST_MARKERS ?: 'not e2e and not admin'}"
+        PYTEST_MARKERS = "${params.PYTEST_MARKERS ?: 'smoke or read_only'}"
     }
 
     options {
