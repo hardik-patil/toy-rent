@@ -125,13 +125,29 @@ def build_remote_script(duration_s, jfr_settings, do_jfr, do_heap, heap_all,
         # belt-and-braces.
         "PID=$(jcmd -l 2>/dev/null | grep '\\.jar' | grep -v sun.tools.jcmd | awk 'NR==1{print $1}')",
         'if [ -z "${PID:-}" ]; then echo "[cap] ERROR: no .jar JVM found"; jcmd -l || true; exit 1; fi',
-        'echo "[cap] target PID=$PID"',
+        # HotSpot's dynamic attach requires the caller's euid to match the target
+        # JVM's - being root in the ephemeral container is NOT enough across
+        # containers, because the JVM checks that the .attach_pid<n> trigger file
+        # is owned by its own uid before it will answer. The repo's services run
+        # as uid 1000 (USER toyrental), so run every jcmd as that uid via setpriv.
+        "TUID=$(awk '/^Uid:/{print $2}' /proc/$PID/status 2>/dev/null || echo 0)",
+        "TGID=$(awk '/^Gid:/{print $2}' /proc/$PID/status 2>/dev/null || echo 0)",
+        'echo "[cap] target PID=$PID uid=$TUID gid=$TGID"',
+        'if [ "$TUID" != "0" ] && command -v setpriv >/dev/null 2>&1; then',
+        '  JC="setpriv --reuid=$TUID --regid=$TGID --clear-groups jcmd"',
+        '  echo "[cap] running jcmd as uid $TUID (setpriv)"',
+        'elif [ "$TUID" != "0" ]; then',
+        '  echo "[cap] WARNING: target runs as uid $TUID but setpriv is missing - attach may fail"',
+        '  JC="jcmd"',
+        'else',
+        '  JC="jcmd"',
+        'fi',
     ]
 
     if do_jfr:
         L += [
             f'echo "[cap] JFR.start duration={duration_s}s settings={jfr_settings}"',
-            f'jcmd "$PID" JFR.start name=capture duration={duration_s}s '
+            f'$JC "$PID" JFR.start name=capture duration={duration_s}s '
             f'filename={REMOTE_JFR} settings={jfr_settings}',
         ]
 
@@ -140,7 +156,7 @@ def build_remote_script(duration_s, jfr_settings, do_jfr, do_heap, heap_all,
         L += [
             "i=1",
             f'while [ "$i" -le {thread_dumps} ]; do',
-            f'  jcmd "$PID" Thread.print -l > {REMOTE_TDUMP}-$i.txt && echo "[cap] threaddump-$i"',
+            f'  $JC "$PID" Thread.print -l > {REMOTE_TDUMP}-$i.txt && echo "[cap] threaddump-$i"',
             "  i=$((i+1))",
             f'  [ "$i" -le {thread_dumps} ] && sleep {thread_interval} || true',
             "done",
@@ -152,13 +168,13 @@ def build_remote_script(duration_s, jfr_settings, do_jfr, do_heap, heap_all,
         L.append(f'echo "[cap] recording... {remain}s remaining"; sleep {remain}')
 
     if do_jfr:
-        L.append('echo "[cap] JFR.stop"; jcmd "$PID" JFR.stop name=capture || true')
+        L.append('echo "[cap] JFR.stop"; $JC "$PID" JFR.stop name=capture || true')
 
     if do_heap:
         ha = "-all " if heap_all else ""
         L.append(
             f'echo "[cap] GC.heap_dump {ha}{REMOTE_HPROF}"; '
-            f'jcmd "$PID" GC.heap_dump {ha}{REMOTE_HPROF}'
+            f'$JC "$PID" GC.heap_dump {ha}{REMOTE_HPROF}'
         )
 
     L += [

@@ -41,18 +41,34 @@ with a *full JDK* to the target pod, sharing just that one container's process n
    ```
 
 3. Inside the debug container, find the target JVM's PID (visible because of the shared
-   process namespace — it won't be PID 1 from this view):
+   process namespace — with `--target` it may well be PID 1) and the UID it runs as:
    ```bash
-   ps aux | grep app.jar
+   ps -eo pid,user,args | grep '[a]pp.jar'      # PID + user
+   awk '/^Uid:/{print $2}' /proc/<PID>/status   # numeric uid, e.g. 1000
    ```
+
+   **The debug container is root, but all three services run their JVM as `uid 1000`
+   (`USER toyrental` in every Dockerfile).** HotSpot's dynamic attach checks that the
+   `.attach_pid<n>` trigger file is owned by the *target JVM's own uid* before it will
+   answer — so a root `jcmd` against a uid-1000 JVM fails with:
+   ```
+   com.sun.tools.attach.AttachNotSupportedException: Unable to open socket file
+   /tmp/.java_pid1: target process 1 doesn't respond within 10500ms or HotSpot VM not loaded
+   ```
+   The fix is to run `jcmd` as that uid. `eclipse-temurin:17-jdk-jammy` ships `setpriv`:
+   ```bash
+   JC="setpriv --reuid=1000 --regid=999 --clear-groups jcmd"
+   ```
+   (`scripts/capture_diagnostics.py` now does this automatically — it reads the target's
+   Uid/Gid from `/proc/$PID/status` and wraps every `jcmd` in `setpriv`.)
 
 4. Start the recording (writes into the **target container's** filesystem, not the debug
    container's):
    ```bash
-   jcmd <PID> JFR.start duration=15m filename=/tmp/recording.jfr name=perf15
+   $JC <PID> JFR.start duration=15m filename=/tmp/recording.jfr name=perf15
    ```
-   Check progress any time with `jcmd <PID> JFR.check`, or stop it early with
-   `jcmd <PID> JFR.stop name=perf15`.
+   Check progress any time with `$JC <PID> JFR.check`, or stop it early with
+   `$JC <PID> JFR.stop name=perf15`.
 
 5. Wait for it to finish (or `sleep 900` right there in the debug shell), then `exit` the
    debug container.
