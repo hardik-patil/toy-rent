@@ -7,6 +7,16 @@ pipeline {
         string(name: 'RAMP_UP',       defaultValue: '10', description: 'Ramp-up seconds')
         string(name: 'TEST_DURATION', defaultValue: '90', description: 'Scheduler duration, seconds')
         string(name: 'TPS',           defaultValue: '5',  description: 'Target throughput')
+        choice(name: 'JMX_FILE',
+               choices: [
+                   'Regression_toyRental.jmx',
+                   'ToyRentalMixed-60-tps.jmx',
+                   'ToyRentalMixed.jmx',
+                   'TopyRentalMixed.jmx',
+                   'catalogue-browse.jmx',
+               ],
+               description: 'Which .jmx plan under loadtest/ to run (first entry is the default). ' +
+                            'Add a new plan here when you commit one.')
 
         // --- API functional gate (tests/ pytest suite) ---
         booleanParam(name: 'RUN_API_TESTS', defaultValue: true,
@@ -98,8 +108,9 @@ pipeline {
         stage('Run JMeter (non-GUI)') {
             steps {
                 sh """
+                    test -f loadtest/${params.JMX_FILE} || { echo "loadtest/${params.JMX_FILE} not found"; exit 1; }
                     /opt/jmeter/bin/jmeter -n \
-                        -t loadtest/Regression_toyRental.jmx \
+                        -t loadtest/${params.JMX_FILE} \
                         -JHOST=host.docker.internal -JTOY_PORT=8081 -JBOOKING_PORT=8082 \
                         -JTHREADS=${params.THREADS} -JRAMP_UP=${params.RAMP_UP} \
                         -JTEST_DURATION=${params.TEST_DURATION} -JTPS=${params.TPS} \
