@@ -16,6 +16,52 @@ stringData:
   MINIO_SECRET_KEY: minioadmin
   ADMIN_USERNAME: admin
   ADMIN_PASSWORD: admin123
+  # Dev-only placeholder keypair (same convention as the other dev secrets in this file) -
+  # generate your own for a real deployment. Shared across every booking-service replica so
+  # they all sign/validate JWTs with the same key - see JwtKeyConfig's Javadoc and CLAUDE.md's
+  # Known Bugs table (2026-10-01): each replica used to generate its own random keypair at
+  # startup, so a token signed by one pod was silently rejected by toy-service or by the
+  # *other* booking-service replica, depending on which pod's key the validator had cached.
+  JWT_SIGNING_KEY_ID: ad2ab7b5-0c10-40d9-a724-78ce08ecda96
+  JWT_PRIVATE_KEY: |
+    -----BEGIN PRIVATE KEY-----
+    MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCvMcmRjQOB0w6s
+    iTKFiH6c0c0TyCjpcqyITBylVOjPFPX8jXmwDeBjeGjYAOM7FDcnpLzO0Au61taY
+    QlrueeDB5Jzq1hwHoGQRXrom9GBfMHoolJM7th02zu23jlJD+Q/s1vbwwwzLMioL
+    XQT6msECDEW8Quc63Agiv7G4IfjVdW4PolNwLKpCIqid0ko9Fi9iDCrzEVQ/52P0
+    +WMx1e0RxvTQRFayik89lcAfGMVQTRbwoipi55LyQ/Z9qL5hg8S+XUr0nXW25o36
+    /H0NZLPAO+yEO/FSUGXa5QZnjKiiJ1tvv9gdNYhpeaa/ASUs1NOibalo3jbiPIrl
+    iGfMA8NFAgMBAAECggEAGbDg4LW/lmmnZLjHzloqSv/fJW/8Q+Oblm8m4j3V2Aw4
+    WF08w4r9ZUjSgx56M/8uaWNYhrFujusTVAejAwafZX+LXUqhmKK2Ge/8t1qtyTe4
+    KjxDbQWzOgbVSE4YFTywT6hkVQEdXqzQCpOM99z6wbyf+1AKTZDXppTa0Gg278JG
+    xkHIRVDd4XIx6JpCiSxVsH1TxFgJ/K92SPNKEaacPJuIb66xyMnxHq07io8lwzIA
+    MgvPM3WpUYkMPRMpSk3ZjGTytys7ndrfMGxmmwUbR8aVJYJBEdBUOpaY87FBPeXS
+    +2KmrkxMt5dfHal7pOCgh6R+RsATDBJ3jjonZNtZ7wKBgQDpYYYfrv4gbocwodaR
+    QNpRKS3uwt19nrTUzwp0d8azy49E9yaPZKbWacxIKg00HvvRRN2BCDtyWHTL490F
+    rORxdYMIzxPmI2VrJWOCWKT+qRdoNSqix/E+KwwTxKd2c/TxJJ5aJv3zlWtrQ+G+
+    AUDrTdXOTAuS3PZN2VQ50iPQcwKBgQDALJVqX0xro0+6jpCtDa9VBFM7z5ETAs/l
+    ANattMfMVZSH5j7Btff8PYq7PGAek1YpvYI4kE+Ki944/r3LLfquw8IbyRRw+wt6
+    F09aN49kaJBcZ0U8DWC2UdyOXWtKhemeN7+cVHYSlkfiPovZfSlLFPgFAcbAoBrK
+    DFuqoElHZwKBgE2Ux9tcdsodM/+srQFYR7rXL5fBW5PY4FAmC1mwP3OhZZ0Nc9oT
+    IYsBXJFYuU7sRdXJSMEOFYTrdtgYhW7PjJlS8R5KiFjmx14Y7b107lRhrZBMrEG0
+    qbN65+biZrDv1ysaezGI6L7CmxTrWe2pyQTvuPV9PhOyNIaoimE2RAWVAoGASxZg
+    f0KjMn+KHIOt5eAt/NMGzpzou3vizUDJoO+9DYr20S7WoIvATI+jUEtj5y58gSyp
+    3/4LBkBmYPCwKd5aT8TvaDnmQcrljhvjhoWlAn+UwHYdaDx16GcN/ZZk4KZ4RLjV
+    pnid9d9AURdNP3qXEt4rlpE+Hm+wZ/fyLTYZy8sCgYEA0SJxgSJOpxJmqQDsymEw
+    +6ZGA23MqaQThm/Gx3jbV/VopQyb6P7uFG+RssNBb6rfY3btRCG7gEpxH0TCBiXe
+    +GpkOo8uSFRrxQ3kpkpO1gsEXV14wI/A+pMCG7Ecu0bXjG8fmX6gfSDWAwTkRh/Y
+    +TN3K/qIQuOnNlc+lQugYdk=
+    -----END PRIVATE KEY-----
+  JWT_PUBLIC_KEY: |
+    -----BEGIN PUBLIC KEY-----
+    MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArzHJkY0DgdMOrIkyhYh+
+    nNHNE8go6XKsiEwcpVTozxT1/I15sA3gY3ho2ADjOxQ3J6S8ztALutbWmEJa7nng
+    weSc6tYcB6BkEV66JvRgXzB6KJSTO7YdNs7tt45SQ/kP7Nb28MMMyzIqC10E+prB
+    AgxFvELnOtwIIr+xuCH41XVuD6JTcCyqQiKondJKPRYvYgwq8xFUP+dj9PljMdXt
+    Ecb00ERWsopPPZXAHxjFUE0W8KIqYueS8kP2fai+YYPEvl1K9J11tuaN+vx9DWSz
+    wDvshDvxUlBl2uUGZ4yooidbb7/YHTWIaXmmvwElLNTTom2paN424jyK5YhnzAPD
+    RQIDAQAB
+    -----END PUBLIC KEY-----
 
 ---
 # Applies to every @KafkaListener in this service (one shared container factory) —
@@ -60,7 +106,7 @@ spec:
     spec:
       containers:
         - name: booking-service
-          image: toyrental/booking-service:1.0.12
+          image: toyrental/booking-service:1.0.13
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8082
@@ -116,6 +162,21 @@ spec:
                 secretKeyRef:
                   name: booking-service-secret
                   key: ADMIN_PASSWORD
+            - name: JWT_SIGNING_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: booking-service-secret
+                  key: JWT_SIGNING_KEY_ID
+            - name: JWT_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: booking-service-secret
+                  key: JWT_PRIVATE_KEY
+            - name: JWT_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: booking-service-secret
+                  key: JWT_PUBLIC_KEY
             - name: ZIPKIN_ENDPOINT
               value: http://zipkin.monitoring.svc.cluster.local:9411/api/v2/spans
             - name: LOG_LEVEL
