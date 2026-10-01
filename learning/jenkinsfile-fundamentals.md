@@ -5,7 +5,9 @@ real, working `loadtest/Jenkinsfile` in this repo as the running example. Compan
 [jmeter-jenkins-guide.md](jmeter-jenkins-guide.md) — that doc covers *why this pipeline is
 shaped the way it is* (Docker vs. native, GitHub as source of truth, the gate design); this
 one covers *the Groovy/declarative-pipeline syntax itself*, so you could rebuild
-`loadtest/Jenkinsfile` from a blank file and explain every line of it to an interviewer.
+`loadtest/Jenkinsfile` from a blank file and explain every line of it to an interviewer. For
+the Groovy *language* underneath the declarative skeleton — string interpolation, the Elvis
+operator, `script {}`, closures — see [groovy-fundamentals.md](groovy-fundamentals.md).
 
 ---
 

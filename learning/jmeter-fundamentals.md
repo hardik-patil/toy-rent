@@ -4,7 +4,9 @@ A working reference for scripting and running JMeter against this stack. Not a t
 you read once — the "Common mistakes" section at the bottom is the part that actually
 saves a wasted afternoon. For the test scenarios and pass/fail criteria, see
 [../loadtest/PLAN.md](../loadtest/PLAN.md). For how to install and run, see
-[../loadtest/README.md](../loadtest/README.md).
+[../loadtest/README.md](../loadtest/README.md). For the Groovy language itself — what runs
+inside every JSR223 Sampler/PreProcessor/PostProcessor/Assertion element you'll meet below —
+see [groovy-fundamentals.md](groovy-fundamentals.md).
 
 ---
 
