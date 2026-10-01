@@ -41,6 +41,7 @@ spec:
       containers:
         - name: minio
           image: minio/minio:latest
+          imagePullPolicy: IfNotPresent
           args: ["server", "/data", "--console-address", ":9001"]
           ports:
             - containerPort: 9000
@@ -120,6 +121,7 @@ spec:
       containers:
         - name: minio-init
           image: minio/mc:latest
+          imagePullPolicy: IfNotPresent
           envFrom:
             - secretRef:
                 name: minio-secret
