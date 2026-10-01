@@ -1,0 +1,429 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Month-End Report (J7)">
+      <stringProp name="TestPlan.comments">SLOs.md J7: POST /api/v1/admin/reports/trigger -&gt; monthly.report.generated, SLO trigger-&gt;generated &lt;= 30s. Not a throughput test (SLOs.md: &quot;1 run/month&quot;, n/a for peak concurrency) - this is a correctness+timing test: (1) fire TRIGGER_THREADS concurrent trigger requests for the SAME month/year to prove the eventId+Couchbase idempotency check (CLAUDE.md&apos;s Month-End Report Flow) really prevents duplicate report generation when an admin double-clicks, (2) poll until the report reaches a terminal status or POLL_TIMEOUT_S elapses, (3) download the resulting PDF to prove the whole pipeline (aggregate -&gt; iText -&gt; MinIO upload -&gt; DB/Couchbase SUCCESS) worked end to end. The authoritative duration number is server-side (pdf.generation.duration Timer in Grafana + Kafka month.end.trigger/monthly.report.generated occurredAt timestamps per SLOs.md SLI table) - this plan&apos;s own poll timing is just a coarse client-side cross-check, off by up to one POLL_INTERVAL_MS. Needs a MONTH/YEAR with no existing monthly_reports row (UNIQUE(month,year) - see README) and, for a meaningful (non-empty) report, a month with real CONFIRMED bookings. Re-running against a MONTH/YEAR that already reached SUCCESS is a valid idempotency check but times out near-instantly (nothing to generate), not a fresh timing run - pick a new -JMONTH/-JYEAR for that. See loadtest/plans/README.md and loadtest/PLAN.md.</stringProp>
+      <boolProp name="TestPlan.tearDown_on_shutdown">true</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="HOST" elementType="Argument">
+            <stringProp name="Argument.name">HOST</stringProp>
+            <stringProp name="Argument.value">${__P(HOST,localhost)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="BOOKING_PORT" elementType="Argument">
+            <stringProp name="Argument.name">BOOKING_PORT</stringProp>
+            <stringProp name="Argument.value">${__P(BOOKING_PORT,8082)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="ADMIN_USER" elementType="Argument">
+            <stringProp name="Argument.name">ADMIN_USER</stringProp>
+            <stringProp name="Argument.value">${__P(ADMIN_USER,admin)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="ADMIN_PASS" elementType="Argument">
+            <stringProp name="Argument.name">ADMIN_PASS</stringProp>
+            <stringProp name="Argument.value">${__P(ADMIN_PASS,admin123)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="MONTH" elementType="Argument">
+            <stringProp name="Argument.name">MONTH</stringProp>
+            <stringProp name="Argument.value">${__P(MONTH,9)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="YEAR" elementType="Argument">
+            <stringProp name="Argument.name">YEAR</stringProp>
+            <stringProp name="Argument.value">${__P(YEAR,2026)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="TRIGGER_THREADS" elementType="Argument">
+            <stringProp name="Argument.name">TRIGGER_THREADS</stringProp>
+            <stringProp name="Argument.value">${__P(TRIGGER_THREADS,3)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="POLL_INTERVAL_MS" elementType="Argument">
+            <stringProp name="Argument.name">POLL_INTERVAL_MS</stringProp>
+            <stringProp name="Argument.value">${__P(POLL_INTERVAL_MS,2000)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="POLL_TIMEOUT_S" elementType="Argument">
+            <stringProp name="Argument.name">POLL_TIMEOUT_S</stringProp>
+            <stringProp name="Argument.value">${__P(POLL_TIMEOUT_S,90)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+    </TestPlan>
+    <hashTree>
+      <ConfigTestElement guiclass="HttpDefaultsGui" testclass="ConfigTestElement" testname="HTTP Request Defaults">
+        <intProp name="HTTPSampler.connect_timeout">5000</intProp>
+        <intProp name="HTTPSampler.response_timeout">20000</intProp>
+        <stringProp name="HTTPSampler.domain">${HOST}</stringProp>
+        <stringProp name="HTTPSampler.port">${BOOKING_PORT}</stringProp>
+        <stringProp name="HTTPSampler.protocol">http</stringProp>
+        <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+          <collectionProp name="Arguments.arguments"/>
+        </elementProp>
+        <stringProp name="HTTPSampler.implementation"></stringProp>
+      </ConfigTestElement>
+      <hashTree/>
+      <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="Content-Type header">
+        <collectionProp name="HeaderManager.headers">
+          <elementProp name="" elementType="Header">
+            <stringProp name="Header.name">Content-Type</stringProp>
+            <stringProp name="Header.value">application/json</stringProp>
+          </elementProp>
+        </collectionProp>
+      </HeaderManager>
+      <hashTree/>
+      <SetupThreadGroup guiclass="SetupThreadGroupGui" testclass="SetupThreadGroup" testname="setUp - Admin login">
+        <intProp name="ThreadGroup.num_threads">1</intProp>
+        <intProp name="ThreadGroup.ramp_time">1</intProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+        <stringProp name="ThreadGroup.on_sample_error">stoptestnow</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller">
+          <stringProp name="LoopController.loops">1</stringProp>
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+        </elementProp>
+      </SetupThreadGroup>
+      <hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POST /api/v1/admin/login">
+          <stringProp name="HTTPSampler.path">/api/v1/admin/login</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                <stringProp name="Argument.value">{&quot;username&quot;:&quot;${ADMIN_USER}&quot;,&quot;password&quot;:&quot;${ADMIN_PASS}&quot;}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="Extract adminToken">
+            <stringProp name="JSONPostProcessor.referenceNames">adminToken</stringProp>
+            <stringProp name="JSONPostProcessor.jsonPathExprs">$.accessToken</stringProp>
+            <stringProp name="JSONPostProcessor.match_numbers">1</stringProp>
+            <stringProp name="JSONPostProcessor.defaultValues">ADMIN_TOKEN_NOT_FOUND</stringProp>
+          </JSONPostProcessor>
+          <hashTree/>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert admin login 200">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="49586">200</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.custom_message">Admin login failed - trigger and poll requests will all 401. Check ADMIN_USER/ADMIN_PASS (default admin/admin123, see CLAUDE.md env vars table).</stringProp>
+            <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">8</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+          <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="share adminToken via props (crosses Thread Groups)">
+            <stringProp name="TestPlan.comments">vars are per-thread-group; the Trigger and Poll Thread Groups below are separate thread groups from this setUp one, so the JWT has to travel through JMeterProperties (props), which are JVM-global, not vars.</stringProp>
+            <stringProp name="cacheKey">true</stringProp>
+            <stringProp name="filename"></stringProp>
+            <stringProp name="parameters"></stringProp>
+            <stringProp name="script">props.put(&quot;adminToken&quot;, vars.get(&quot;adminToken&quot;))</stringProp>
+            <stringProp name="scriptLanguage">groovy</stringProp>
+          </JSR223PostProcessor>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Trigger (concurrent x TRIGGER_THREADS)">
+        <stringProp name="TestPlan.comments">Fires TRIGGER_THREADS simultaneous POSTs for the same MONTH/YEAR - simulates an admin double-clicking, or two admins triggering the same close at once. Each publishes a month.end.trigger Kafka event; the single-partition topic + report-cg&apos;s eventId/Couchbase idempotency check (CLAUDE.md Month-End Report Flow step 1) should let exactly one of them actually generate a report. This Thread Group itself only proves the trigger endpoint accepts concurrent calls cleanly (202s, no 5xx) - the idempotency proof is that Poll below finds exactly one report row for this MONTH/YEAR (see monthly_reports UNIQUE(month,year); a second real INSERT attempt would violate it and surface as a FAILED status or a log error, not silently duplicate).</stringProp>
+        <stringProp name="ThreadGroup.num_threads">${TRIGGER_THREADS}</stringProp>
+        <intProp name="ThreadGroup.ramp_time">0</intProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller">
+          <stringProp name="LoopController.loops">1</stringProp>
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+        </elementProp>
+      </ThreadGroup>
+      <hashTree>
+        <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="Bearer admin token (this call only)">
+          <collectionProp name="HeaderManager.headers">
+            <elementProp name="" elementType="Header">
+              <stringProp name="Header.name">Authorization</stringProp>
+              <stringProp name="Header.value">Bearer ${__property(adminToken)}</stringProp>
+            </elementProp>
+          </collectionProp>
+        </HeaderManager>
+        <hashTree/>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POST /api/v1/admin/reports/trigger">
+          <stringProp name="HTTPSampler.path">/api/v1/admin/reports/trigger</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                <stringProp name="Argument.value">{&quot;month&quot;:${MONTH},&quot;year&quot;:${YEAR}}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert 202 Accepted" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="49588">202</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.custom_message">Trigger did not return 202 - check admin auth and that month/year passed validation (1-12, year&gt;=2020)</stringProp>
+            <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">8</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+      <PostThreadGroup guiclass="PostThreadGroupGui" testclass="PostThreadGroup" testname="tearDown - Poll for completion + download PDF" enabled="true">
+        <stringProp name="TestPlan.comments">tearDown Thread Groups run after every regular (non-setUp) Thread Group has finished - guarantees this starts only once all TRIGGER_THREADS trigger calls above have completed, without needing cross-group synchronization.</stringProp>
+        <intProp name="ThreadGroup.num_threads">1</intProp>
+        <intProp name="ThreadGroup.ramp_time">1</intProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller">
+          <stringProp name="LoopController.loops">1</stringProp>
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+        </elementProp>
+      </PostThreadGroup>
+      <hashTree>
+        <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="Bearer admin token (whole group)">
+          <collectionProp name="HeaderManager.headers">
+            <elementProp name="" elementType="Header">
+              <stringProp name="Header.name">Authorization</stringProp>
+              <stringProp name="Header.value">Bearer ${__property(adminToken)}</stringProp>
+            </elementProp>
+          </collectionProp>
+        </HeaderManager>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="init poll state">
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="parameters"></stringProp>
+          <stringProp name="script">vars.put(&quot;reportStatus&quot;, &quot;GENERATING&quot;)
+vars.put(&quot;reportId&quot;, &quot;NOTFOUND&quot;)
+vars.put(&quot;pollDeadline&quot;, (System.currentTimeMillis() + (${POLL_TIMEOUT_S} as long) * 1000L).toString())</stringProp>
+          <stringProp name="scriptLanguage">groovy</stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <WhileController guiclass="WhileControllerGui" testclass="WhileController" testname="While Controller-poll-until-terminal-or-timeout">
+          <stringProp name="WhileController.condition">${__groovy(!&quot;SUCCESS&quot;.equals(vars.get(&quot;reportStatus&quot;)) &amp;&amp; !&quot;FAILED&quot;.equals(vars.get(&quot;reportStatus&quot;)) &amp;&amp; System.currentTimeMillis() &lt; Long.parseLong(vars.get(&quot;pollDeadline&quot;)),)}</stringProp>
+          <stringProp name="TestPlan.comments">MUST be __groovy, not __jexl3 - this JMeter 5.6.3&apos;s bundled Commons JEXL3 silently fails on static-method calls (System.currentTimeMillis(), Long.parseLong()), resolving to empty string instead of throwing, which would leave this condition permanently true and loop forever instead of exiting on timeout. See CLAUDE.md&apos;s Known Bugs table (2026-09-05, ToyRentalMixed-60-tps.jmx) - same bug class, already hit once in this project.</stringProp>
+        </WhileController>
+        <hashTree>
+          <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POLL GET /api/v1/admin/reports (newest)" enabled="true">
+            <stringProp name="HTTPSampler.path">/api/v1/admin/reports</stringProp>
+            <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+            <stringProp name="HTTPSampler.method">GET</stringProp>
+            <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+            <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+            <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+              <collectionProp name="Arguments.arguments">
+                <elementProp name="sort" elementType="HTTPArgument">
+                  <boolProp name="HTTPArgument.always_encode">true</boolProp>
+                  <stringProp name="Argument.value">createdAt,desc</stringProp>
+                  <stringProp name="Argument.metadata">=</stringProp>
+                  <boolProp name="HTTPArgument.use_equals">true</boolProp>
+                  <stringProp name="Argument.name">sort</stringProp>
+                </elementProp>
+                <elementProp name="size" elementType="HTTPArgument">
+                  <boolProp name="HTTPArgument.always_encode">true</boolProp>
+                  <stringProp name="Argument.value">1</stringProp>
+                  <stringProp name="Argument.metadata">=</stringProp>
+                  <boolProp name="HTTPArgument.use_equals">true</boolProp>
+                  <stringProp name="Argument.name">size</stringProp>
+                </elementProp>
+              </collectionProp>
+            </elementProp>
+          </HTTPSamplerProxy>
+          <hashTree>
+            <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert 200 OK" enabled="true">
+              <collectionProp name="Asserion.test_strings">
+                <stringProp name="49586">200</stringProp>
+              </collectionProp>
+              <stringProp name="Assertion.custom_message"></stringProp>
+              <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+              <boolProp name="Assertion.assume_success">false</boolProp>
+              <intProp name="Assertion.test_type">8</intProp>
+            </ResponseAssertion>
+            <hashTree/>
+            <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="Extract reportId" enabled="true">
+              <stringProp name="JSONPostProcessor.referenceNames">reportId</stringProp>
+              <stringProp name="JSONPostProcessor.jsonPathExprs">$.content[0].id</stringProp>
+              <stringProp name="JSONPostProcessor.match_numbers">1</stringProp>
+              <stringProp name="JSONPostProcessor.defaultValues">NOTFOUND</stringProp>
+            </JSONPostProcessor>
+            <hashTree/>
+            <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="Extract reportStatus" enabled="true">
+              <stringProp name="JSONPostProcessor.referenceNames">reportStatus</stringProp>
+              <stringProp name="JSONPostProcessor.jsonPathExprs">$.content[0].status</stringProp>
+              <stringProp name="JSONPostProcessor.match_numbers">1</stringProp>
+              <stringProp name="JSONPostProcessor.defaultValues">UNKNOWN</stringProp>
+            </JSONPostProcessor>
+            <hashTree/>
+            <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="Extract polledMonth/polledYear" enabled="true">
+              <stringProp name="JSONPostProcessor.referenceNames">polledMonth;polledYear</stringProp>
+              <stringProp name="JSONPostProcessor.jsonPathExprs">$.content[0].month;$.content[0].year</stringProp>
+              <stringProp name="JSONPostProcessor.match_numbers">1;1</stringProp>
+              <stringProp name="JSONPostProcessor.defaultValues">-1;-1</stringProp>
+            </JSONPostProcessor>
+            <hashTree/>
+            <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="reconcile: ignore a stale pre-existing report" enabled="true">
+              <stringProp name="TestPlan.comments">Real race found by running this plan against the live cluster (2026-09-23): the trigger POST returns 202 as soon as the event is PUBLISHED, not once report-cg has consumed it and inserted the GENERATING row - there&apos;s a real gap (Kafka produce -&gt; consumer poll -&gt; INSERT) before our MONTH/YEAR row exists at all. A poll landing inside that gap gets content[0] = whatever OTHER report happens to be newest by createdAt (e.g. a prior month already SUCCESS) and the loop wrongly declared victory instantly. Fix: only trust reportStatus when content[0]&apos;s month/year actually match what we triggered; otherwise treat it as still-pending and keep polling.</stringProp>
+              <stringProp name="cacheKey">true</stringProp>
+              <stringProp name="filename"></stringProp>
+              <stringProp name="parameters"></stringProp>
+              <stringProp name="script">if (!(vars.get(&quot;polledMonth&quot;) == &quot;${MONTH}&quot; &amp;&amp; vars.get(&quot;polledYear&quot;) == &quot;${YEAR}&quot;)) {
+    vars.put(&quot;reportStatus&quot;, &quot;PENDING&quot;)
+    vars.put(&quot;reportId&quot;, &quot;NOTFOUND&quot;)
+}</stringProp>
+              <stringProp name="scriptLanguage">groovy</stringProp>
+            </JSR223PostProcessor>
+            <hashTree/>
+          </hashTree>
+          <TestAction guiclass="TestActionGui" testclass="TestAction" testname="Pause POLL_INTERVAL_MS" enabled="true">
+            <intProp name="ActionProcessor.action">1</intProp>
+            <intProp name="ActionProcessor.target">0</intProp>
+            <stringProp name="ActionProcessor.duration">${POLL_INTERVAL_MS}</stringProp>
+          </TestAction>
+          <hashTree/>
+        </hashTree>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="Assert report reached SUCCESS" enabled="true">
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="parameters"></stringProp>
+          <stringProp name="script">def status = vars.get(&quot;reportStatus&quot;)
+def rid = vars.get(&quot;reportId&quot;)
+SampleResult.setResponseData(&quot;reportId=&quot; + rid + &quot; finalStatus=&quot; + status, &quot;UTF-8&quot;)
+if (status == &quot;SUCCESS&quot;) {
+    SampleResult.setSuccessful(true)
+    SampleResult.setResponseMessage(&quot;Report &quot; + rid + &quot; reached SUCCESS&quot;)
+} else {
+    SampleResult.setSuccessful(false)
+    SampleResult.setResponseMessage(&quot;Report did not reach SUCCESS within POLL_TIMEOUT_S=${POLL_TIMEOUT_S}s - last status=&quot; + status + &quot; (id=&quot; + rid + &quot;). If status is still GENERATING this may just be bottleneck #3 (HikariCP) or #4 (Kafka lag) making the batch genuinely slow - check Grafana pdf.generation.duration and kafka-lag-exporter before assuming a script bug.&quot;)
+}</stringProp>
+          <stringProp name="scriptLanguage">groovy</stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <IfController guiclass="IfControllerPanel" testclass="IfController" testname="if SUCCESS - download PDF" enabled="true">
+          <stringProp name="IfController.condition">${__groovy(&quot;SUCCESS&quot;.equals(vars.get(&quot;reportStatus&quot;)),)}</stringProp>
+          <boolProp name="IfController.evaluateAll">false</boolProp>
+          <boolProp name="IfController.useExpression">true</boolProp>
+        </IfController>
+        <hashTree>
+          <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="GET /api/v1/admin/reports/{id}/pdf" enabled="true">
+            <stringProp name="HTTPSampler.path">/api/v1/admin/reports/${reportId}/pdf</stringProp>
+            <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+            <stringProp name="HTTPSampler.method">GET</stringProp>
+            <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+            <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+            <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+              <collectionProp name="Arguments.arguments"/>
+            </elementProp>
+          </HTTPSamplerProxy>
+          <hashTree>
+            <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert 200 OK" enabled="true">
+              <collectionProp name="Asserion.test_strings">
+                <stringProp name="49586">200</stringProp>
+              </collectionProp>
+              <stringProp name="Assertion.custom_message">PDF download failed - report says SUCCESS but pdf_storage_path/MinIO object may be missing</stringProp>
+              <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+              <boolProp name="Assertion.assume_success">false</boolProp>
+              <intProp name="Assertion.test_type">8</intProp>
+            </ResponseAssertion>
+            <hashTree/>
+            <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert Content-Type is application/pdf" enabled="true">
+              <collectionProp name="Asserion.test_strings">
+                <stringProp name="-1248334925">application/pdf</stringProp>
+              </collectionProp>
+              <stringProp name="Assertion.custom_message"></stringProp>
+              <stringProp name="Assertion.test_field">Assertion.response_headers</stringProp>
+              <boolProp name="Assertion.assume_success">false</boolProp>
+              <intProp name="Assertion.test_type">16</intProp>
+            </ResponseAssertion>
+            <hashTree/>
+          </hashTree>
+        </hashTree>
+      </hashTree>
+      <ResultCollector guiclass="SummaryReport" testclass="ResultCollector" testname="Summary Report">
+        <boolProp name="ResultCollector.error_logging">false</boolProp>
+        <objProp>
+          <name>saveConfig</name>
+          <value class="SampleSaveConfiguration">
+            <time>true</time>
+            <latency>true</latency>
+            <timestamp>true</timestamp>
+            <success>true</success>
+            <label>true</label>
+            <code>true</code>
+            <message>true</message>
+            <threadName>true</threadName>
+            <dataType>true</dataType>
+            <encoding>false</encoding>
+            <assertions>true</assertions>
+            <subresults>true</subresults>
+            <responseData>false</responseData>
+            <samplerData>false</samplerData>
+            <xml>false</xml>
+            <fieldNames>true</fieldNames>
+            <responseHeaders>false</responseHeaders>
+            <requestHeaders>false</requestHeaders>
+            <responseDataOnError>false</responseDataOnError>
+            <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
+            <assertionsResultsToSave>0</assertionsResultsToSave>
+            <bytes>true</bytes>
+            <sentBytes>true</sentBytes>
+            <threadCounts>true</threadCounts>
+            <idleTime>true</idleTime>
+            <connectTime>true</connectTime>
+          </value>
+        </objProp>
+        <stringProp name="filename"></stringProp>
+      </ResultCollector>
+      <hashTree/>
+      <ResultCollector guiclass="ViewResultsFullVisualizer" testclass="ResultCollector" testname="View Results Tree">
+        <boolProp name="ResultCollector.error_logging">false</boolProp>
+        <objProp>
+          <name>saveConfig</name>
+          <value class="SampleSaveConfiguration">
+            <time>true</time>
+            <latency>true</latency>
+            <timestamp>true</timestamp>
+            <success>true</success>
+            <label>true</label>
+            <code>true</code>
+            <message>true</message>
+            <threadName>true</threadName>
+            <dataType>true</dataType>
+            <encoding>false</encoding>
+            <assertions>true</assertions>
+            <subresults>true</subresults>
+            <responseData>false</responseData>
+            <samplerData>false</samplerData>
+            <xml>false</xml>
+            <fieldNames>true</fieldNames>
+            <responseHeaders>false</responseHeaders>
+            <requestHeaders>false</requestHeaders>
+            <responseDataOnError>false</responseDataOnError>
+            <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
+            <assertionsResultsToSave>0</assertionsResultsToSave>
+            <bytes>true</bytes>
+            <sentBytes>true</sentBytes>
+            <threadCounts>true</threadCounts>
+            <idleTime>true</idleTime>
+            <connectTime>true</connectTime>
+          </value>
+        </objProp>
+        <stringProp name="filename"></stringProp>
+      </ResultCollector>
+      <hashTree/>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

@@ -14,9 +14,22 @@ pipeline {
                    'ToyRentalMixed.jmx',
                    'TopyRentalMixed.jmx',
                    'catalogue-browse.jmx',
+                   'plans/month-end-report.jmx',
                ],
                description: 'Which .jmx plan under loadtest/ to run (first entry is the default). ' +
-                            'Add a new plan here when you commit one.')
+                            'Add a new plan here when you commit one. ' +
+                            'plans/month-end-report.jmx (J7) ignores THREADS/RAMP_UP/TEST_DURATION/TPS above - ' +
+                            'see the MONTH/YEAR/TRIGGER_THREADS params below instead.')
+
+        // --- plans/month-end-report.jmx (J7) only - ignored by every other JMX_FILE choice ---
+        string(name: 'MONTH', defaultValue: '9',
+               description: 'month-end-report.jmx only. Pick a month with no existing monthly_reports row ' +
+                            '(UNIQUE(month,year) - a repeat trigger for an already-SUCCESS month just proves ' +
+                            'idempotency again, it is not a fresh generation-duration timing run).')
+        string(name: 'YEAR', defaultValue: '2026', description: 'month-end-report.jmx only, paired with MONTH.')
+        string(name: 'TRIGGER_THREADS', defaultValue: '3',
+               description: 'month-end-report.jmx only - concurrent trigger POSTs fired at the same MONTH/YEAR, ' +
+                            'to check the idempotency check collapses a double-click into one report.')
 
         // --- API functional gate (tests/ pytest suite) ---
         booleanParam(name: 'RUN_API_TESTS', defaultValue: true,
@@ -117,6 +130,7 @@ pipeline {
                         -JHOST=host.docker.internal -JTOY_PORT=8081 -JBOOKING_PORT=8082 \
                         -JTHREADS=${params.THREADS} -JRAMP_UP=${params.RAMP_UP} \
                         -JTEST_DURATION=${params.TEST_DURATION} -JTPS=${params.TPS} \
+                        -JMONTH=${params.MONTH} -JYEAR=${params.YEAR} -JTRIGGER_THREADS=${params.TRIGGER_THREADS} \
                         -l ${RESULTS_DIR}/result.jtl \
                         -e -o ${RESULTS_DIR}/html-report
                 """

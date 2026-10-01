@@ -5,6 +5,97 @@ so the conclusions live here. Newest run first. Format per [SLOs.md](SLOs.md) §
 
 ---
 
+## Run 002 — J7 month-end report, new plan built + run
+
+| | |
+|---|---|
+| Run at | 2026-09-23 11:27-11:30 UTC (two passes, MONTH=9 then MONTH=10, both YEAR=2026) |
+| Plan | `plans/month-end-report.jmx` (new — built this session, see `plans/README.md`) |
+| Config | `TRIGGER_THREADS=3`, `POLL_INTERVAL_MS=2000`, `POLL_TIMEOUT_S=90` |
+| Target | J7: `POST /api/v1/admin/reports/trigger` → `monthly.report.generated`, SLO ≤ 30 s |
+| Result | **PASS** (after one script bug found + fixed, see below) |
+
+### What it does
+
+Not a throughput scenario (SLOs.md: J7 is "1 run/month", peak concurrency n/a) — a
+correctness+timing test. `setUp` (admin login) → regular Thread Group (`TRIGGER_THREADS`
+concurrent trigger POSTs at the *same* month/year, to prove double-click safety) →
+`tearDown` (poll `GET /api/v1/admin/reports` until terminal status or timeout, then
+download the PDF).
+
+### Pass 1 — MONTH=9, YEAR=2026 (1,927 real CONFIRMED bookings, ₹15.3L revenue)
+
+8 samples, 0% errors — but the poll loop reported `SUCCESS` on its *very first* check,
+~2.3 s after trigger, which didn't add up against a 1,927-row aggregation + PDF + MinIO
+upload. Cross-checked the DB row directly:
+
+```
+id            | month | year | total_bookings | status  | created_at                  | generated_at                | gen_duration
+rpt-6f8029da  |   9   | 2026 |      1927       | SUCCESS | 2026-09-23 11:28:04.397811   | 2026-09-23 11:28:13.89846   | 00:00:09.500649
+```
+
+Real server-side generation took **9.5 s** — comfortably inside the 30 s SLO — but the
+JMeter poll's first check landed at **11:28:00-01 UTC**, *before* `created_at`
+(11:28:04). It couldn't have seen this report's real status; it must have matched
+something else.
+
+### Script bug found: stale-report race
+
+`GET /api/v1/admin/reports?sort=createdAt,desc&size=1` is correct once the triggered
+report's row exists, but the trigger endpoint returns `202` as soon as the Kafka event
+is *published*, not once `report-cg` has *consumed* it and `INSERT`ed the `GENERATING`
+row. In that gap, `content[0]` is whichever *other* report is currently newest by
+`createdAt` — here, the pre-existing month=8 report, already `SUCCESS` from an earlier
+session. The original script trusted `content[0].status` unconditionally and declared
+victory on the wrong report, one poll cycle in.
+
+**Fix:** also extract `content[0]`'s own `month`/`year` and only trust its `status` when
+both match what was triggered; otherwise treat it as still-pending and keep polling (see
+the `JSR223PostProcessor` "reconcile: ignore a stale pre-existing report" in the `.jmx`,
+and `plans/README.md`).
+
+### Pass 2 — MONTH=10, YEAR=2026 (18 real bookings), fixed script
+
+10 samples, 0% errors. This time the loop correctly polled through the race window:
+
+```
+POLL GET  11:30:14.87 UTC  →  polledMonth/Year mismatch, ignored (reportStatus forced PENDING)
+POLL GET  11:30:17.04 UTC  →  still mismatched/GENERATING
+POLL GET  11:30:19.08 UTC  →  match, status=SUCCESS
+```
+
+DB confirms: `rpt-fa605a2c`, month=10/year=2026, `created_at` 11:30:14.34 →
+`generated_at` 11:30:17.50, **3.16 s** real generation time. PDF downloaded
+(`200`, `Content-Type: application/pdf`).
+
+### Idempotency check — PASS
+
+Both passes fired 3 concurrent trigger POSTs (double-click simulation) at the same
+month/year. Exactly **one** `monthly_reports` row was created each time (confirmed via
+`UNIQUE(month, year)` — a real duplicate INSERT attempt would have surfaced as a DB
+constraint violation, not a silent no-op). The single-partition `month.end.trigger`
+topic + `report-cg`'s eventId/Couchbase existence check hold up under concurrent
+triggers as designed.
+
+### Server-side cross-check
+
+`pdf_generation_duration_seconds_count` in Prometheus reads `2` after both passes,
+confirming the Micrometer `pdf.generation.duration` Timer (SLOs.md's authoritative J7
+SLI source) recorded both runs.
+
+### TODO — next J7 run
+
+- [ ] A soak-style variant: trigger many small/empty months back-to-back to see if the
+      idempotency check or PDF/MinIO path degrades under repeated (not concurrent)
+      triggering — different failure mode from the double-click race tested here.
+- [ ] Grab a `histogram_quantile(0.95, ...)` on `pdf_generation_duration_seconds_bucket`
+      once there are enough samples for a real p95, not just count=2.
+- [ ] Test a genuinely large month (the 1,927-booking Sept run is the largest available
+      today) once more months accumulate real booking volume, to see whether 30s SLO
+      still holds well past ~2k bookings.
+
+---
+
 ## Run 001 — S3 mixed, first real run
 
 | | |
